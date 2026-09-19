@@ -1,0 +1,162 @@
+name: Bug
+description: Report a defect or unexpected behavior.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for defects.
+
+        If this is an exploitable security vulnerability, do **not** file it here. Use [private vulnerability reporting](https://github.com/balarajeai/tinyadmin/security/advisories/new).
+
+        Do not invent a bug ID. Leave it blank if one does not exist yet.
+
+  - type: input
+    id: bug_id
+    attributes:
+      label: Bug ID
+      description: Existing tracker ID only. Do not invent IDs.
+      placeholder: TA-184
+    validations:
+      required: false
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of the defect.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - development
+        - test
+        - staging
+        - production
+        - unknown
+    validations:
+      required: true
+
+  - type: input
+    id: build
+    attributes:
+      label: Build or version
+      description: Commit SHA, release version, or unknown.
+      placeholder: unknown
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Use CRITICAL for destructive data issues, tenant-isolation failures, authorization bypasses, or production security-control failures.
+      options:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Numbered steps. Include frequency.
+      placeholder: |
+        1.
+        2.
+        3.
+
+        Frequency: always / intermittent / unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected and what they cannot do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Commands, responses, traces, screenshots, or issue links that exist. Redact secrets. Do not claim evidence that was not captured.
+      placeholder: |
+        - Commands or responses:
+        - Traces or issue links:
+        - Logs or screenshots:
+    validations:
+      required: true
+
+  - type: textarea
+    id: suspected_area
+    attributes:
+      label: Suspected area
+      description: Application area, module, API, UI, or data path. Do not present guesses as facts.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression test requirement
+      options:
+        - label: A reproducing test exists or is required
+        - label: Related failure paths will be covered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: security_impact
+    attributes:
+      label: Security impact
+      description: Select all that apply. Request Security review when a security impact exists.
+      options:
+        - label: None identified
+        - label: Authentication
+        - label: Authorization
+        - label: Tenant isolation
+        - label: Data exposure
+        - label: Injection
+        - label: Security review required
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: The bug is not done when the implementer only claims it is fixed.
+      placeholder: |
+        - [ ] Reported reproduction no longer occurs
+        - [ ] Expected behavior is restored
+        - [ ] Regression test executed where practical
+        - [ ] QA verified the fix and did not rely only on the implementer
+        - [ ] Code Review complete
+        - [ ] Security review complete if required
+        - [ ] No silent scope expansion
+    validations:
+      required: true
