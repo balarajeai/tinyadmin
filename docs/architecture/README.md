@@ -1,37 +1,26 @@
-# TinyAdmin Architecture
+# TinyAdmin architecture docs
 
-Architecture documentation for TinyAdmin V1.
+Governing product lock: [`docs/product/v1-requirements.md`](../product/v1-requirements.md)  
+Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2)
 
-**Governing issue:** [#2 — Produce TinyAdmin V1 system architecture](https://github.com/balarajeai/tinyadmin/issues/2)
+## V1 system architecture
 
-**Product lock:** [docs/product/v1-requirements.md](../product/v1-requirements.md)
+- [v1-system-architecture.md](./v1-system-architecture.md) — control plane vs Agent data plane, modular monolith module map, sequences, trust boundaries, risks, acceptance criteria
+- Includes Security remediation for `SEC-PR10-001` … `SEC-PR10-004` (2026-09-19)
 
-## Documents
+## ADRs
 
-| Document | Purpose |
+| ADR | Title |
 | --- | --- |
-| [V1 System Architecture](./v1-system-architecture.md) | Control plane vs data plane, modular monolith module map, sequence flows, trust boundaries, risks, and acceptance criteria |
-| [ADRs](./adr/) | Architecture Decision Records for major V1 choices |
+| [0001](./adr/0001-modular-monolith-cloud.md) | Modular monolith for TinyAdmin Cloud |
+| [0002](./adr/0002-control-plane-vs-agent-data-plane.md) | Control plane vs Agent data plane |
+| [0003](./adr/0003-cloud-datastore-postgres-redis-deferred.md) | Cloud PostgreSQL; Redis deferred |
+| [0004](./adr/0004-agent-technology-go.md) | Agent technology: Go |
+| [0005](./adr/0005-cloud-stack-java-spring.md) | Cloud stack: Java 21+ / Spring Boot |
+| [0006](./adr/0006-cloud-agent-security-properties.md) | Mandatory Cloud↔Agent security properties (#3 constraints) |
 
-## Architecture Decision Records (ADRs)
+## Related follow-ons (not this package)
 
-| ADR | Decision |
-| --- | --- |
-| [0001 — Modular monolith cloud](./adr/0001-modular-monolith-cloud.md) | Single Spring Boot deployable with package/module boundaries; reject premature microservices |
-| [0002 — Control plane vs Agent data plane](./adr/0002-control-plane-vs-agent-data-plane.md) | Credentials stay customer-side; Agent outbound-only; Cloud never opens customer DB ports |
-| [0003 — Cloud datastore Postgres; Redis deferred](./adr/0003-cloud-datastore-postgres-redis-deferred.md) | PostgreSQL for control-plane data; Redis deferred for V1 |
-| [0004 — Agent technology Go](./adr/0004-agent-technology-go.md) | Recommend Go for the customer Agent |
-| [0005 — Cloud stack Java / Spring](./adr/0005-cloud-stack-java-spring.md) | Confirm Java 21+ / Spring Boot for Cloud |
-
-## Related issues
-
-| Issue | Relationship |
-| --- | --- |
-| [#2](https://github.com/balarajeai/tinyadmin/issues/2) | This architecture deliverable (governing) |
-| [#3](https://github.com/balarajeai/tinyadmin/issues/3) | Agent↔Cloud protocol / transport / authn / delivery semantics (owns at-least-once vs exactly-once) |
-| [#6](https://github.com/balarajeai/tinyadmin/issues/6) | Domain model |
-| [#4](https://github.com/balarajeai/tinyadmin/issues/4) / [#5](https://github.com/balarajeai/tinyadmin/issues/5) | Security threat modeling (consumes trust-boundary inputs from this design) |
-
-## Status
-
-Proposed for **Security + Code Review**. This package provides design inputs; it does **not** claim Security approval.
+- Issue #3 — Agent↔Cloud protocol selection (must satisfy ADR 0006 / architecture §2.4)
+- Issue #6 — Domain model
+- Issues #4 / #5 — Security threat model and requirements
