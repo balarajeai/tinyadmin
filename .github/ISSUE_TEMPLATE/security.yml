@@ -1,0 +1,138 @@
+name: Security
+description: Security hardening, control gaps, or non-exploitable security work. Do not disclose vulnerabilities here.
+title: "[Security]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Do not publicly disclose exploitable vulnerabilities
+
+        If you believe you found a vulnerability that could be exploited, **stop**.
+
+        Do **not** put reproduction steps, payloads, secrets, or attack details in a public issue.
+
+        Use GitHub **Private Vulnerability Reporting** instead:
+
+        https://github.com/balarajeai/tinyadmin/security/advisories/new
+
+        That form is private to maintainers. Public issues are visible to everyone.
+
+        Use this public template only for non-exploitable security work such as hardening, missing controls, documentation, or process gaps that do not give an attacker a usable path.
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Public disclosure acknowledgement
+      description: Required. If you cannot confirm this, use private vulnerability reporting instead.
+      options:
+        - label: I confirm this issue does NOT describe an exploitable vulnerability, working exploit, secret, or attack payload, and I will not add those details later.
+          required: true
+        - label: If this later appears exploitable, I will stop commenting here and report it through private vulnerability reporting.
+          required: true
+
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: Existing tracker ID only. Do not invent IDs.
+      placeholder: TA-210
+    validations:
+      required: false
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk level
+      description: CRITICAL or HIGH residual risk blocks release unless a human explicitly accepts it.
+      options:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Hardening
+        - Missing control
+        - Authentication / authorization design
+        - Tenant isolation design
+        - Secrets handling process
+        - Dependency or supply chain
+        - Logging / data exposure risk
+        - Documentation or process
+        - Other non-exploitable security work
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the control gap or hardening need without providing an exploit.
+    validations:
+      required: true
+
+  - type: textarea
+    id: assets
+    attributes:
+      label: Assets and trust boundaries
+      description: What is protected and which boundary is involved. Do not include credentials or exploit details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential impact
+      description: High-level impact only. No reproduction, payloads, or secret values.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: review_areas
+    attributes:
+      label: Review areas
+      options:
+        - label: Authentication
+        - label: Authorization / RBAC
+        - label: Tenant isolation
+        - label: Injection
+        - label: Secrets
+        - label: Logging
+        - label: Data exposure
+        - label: Dependencies
+        - label: Network impact
+    validations:
+      required: false
+
+  - type: textarea
+    id: recommended_action
+    attributes:
+      label: Recommended action
+      description: Requested hardening, review, or process change. Independent verification is required after a material fix. The fixer must not be the only approver.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Finding has a severity, affected component, impact, and verification method
+        - [ ] Remediation matches the agreed fix
+        - [ ] Tests or review steps show the control is in place, or residual risk is explicitly accepted by a human
+        - [ ] No secret material is introduced into logs, source, or artifacts
+        - [ ] Independent verification occurred
+        - [ ] Code Review complete when code changes
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        If this report contains exploit details, delete them and use [private vulnerability reporting](https://github.com/balarajeai/tinyadmin/security/advisories/new) immediately.
