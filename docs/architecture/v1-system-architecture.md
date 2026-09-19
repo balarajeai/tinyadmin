@@ -1,13 +1,14 @@
 # TinyAdmin V1 System Architecture
 
-**Status:** Proposed for Security re-review + Code Review (Issue #2)  
+**Status:** Security trust-boundary inputs **acknowledged** (SEC-PR10-001..004 CLEARED); **Code Review re-review required** after CR-PR10 remediation (Issue #2)  
 **Governing issue:** [#2](https://github.com/balarajeai/tinyadmin/issues/2)  
 **Product lock:** [docs/product/v1-requirements.md](../product/v1-requirements.md)  
 **ADRs:** [adr/](./adr/)  
 **Date:** 2026-09-18  
-**Security remediation:** 2026-09-19 — addresses `SEC-PR10-001` … `SEC-PR10-004` (and architecture-level NON-BLOCKING clarifications)
+**Security remediation:** 2026-09-19 — `SEC-PR10-001` … `SEC-PR10-004` CLEARED on commit `0eab8da`  
+**Code Review remediation:** 2026-09-19 — addresses `CR-PR10-001` … `CR-PR10-005`
 
-This document does **not** claim Security approval. It supplies design inputs for Security (#4/#5) and Code Review.
+This document does **not** claim overall product security approval, Issue #3 protocol approval, production readiness, or that Issues #4/#5 are complete. Security acknowledgment covers Issue #2 trust-boundary architecture inputs only.
 
 ---
 
@@ -97,28 +98,38 @@ Single **Spring Boot** deployable. Modules are packages / bounded contexts, not 
 | `tenancy` | Organizations, memberships |
 | `rbac` | Roles/permissions; server-side enforcement; **define** vs **run** Action/approved-field authority |
 | `environments` | Meaningful prod/staging isolation; normative binding rules (§3.4) |
-| `connections` | Connection metadata + which Agent/environment; **immutable** org/env ownership after create; **never** stores DB secrets |
-| `agentcontrol` | Agent registration; enrollment/identity material (#3); heartbeat; command queue/dispatch/outbox; attaches §3.5 authorization bindings to mutating commands |
+| `connections` | Connection metadata including `agent_id` association and readiness fields; **immutable** org/env ownership after create; **never** stores DB secrets; **does not import** `agentcontrol` |
+| `agentcontrol` | Agent registration; enrollment/identity material (#3); heartbeat; command queue/dispatch/outbox; attaches §3.5 authorization bindings to mutating commands; **may read/update** `connections` association/readiness |
 | `discovery` | Schema/collection metadata ingestion & serving (sourced from Agent) |
 | `records` | Search/filter/view orchestration (Agent executes queries) |
 | `actions` | Safe Action defs, approved-field edit configs, preview/execute/rollback orchestration; preview honesty + execute revalidation contracts |
 | `audit` | Append-oriented audit trail with storage-level immutability requirement; 1-year retention target; ops cannot mutate history |
 | `shared` / platform | Cross-cutting tenancy filters, structured logging (**no secrets**), config |
 
-### 3.2 Module dependency rules (normative for V1)
+### 3.2 Module dependency rules (normative for V1) — CR-PR10-001
 
-Allowed examples:
+The allowed dependency graph **MUST** be **acyclic**. Package cycles between modules are forbidden.
+
+#### Ownership direction for Agent ↔ connection association
+
+- `connections` **stores** `agent_id` (and related association/readiness metadata) as **data**. It depends on `tenancy` and `environments` only for ownership validation.
+- `connections` **MUST NOT** import or call `agentcontrol`.
+- `agentcontrol` **MAY** depend on `connections` to validate Agent↔connection association, update readiness/health metadata, and enforce org/env match when dispatching commands.
+- No new microservice is introduced to break the former cycle. A narrow shared ID/DTO type in `shared` (e.g. `AgentId`, `ConnectionId`) **MAY** be used; that is not a service boundary.
+
+#### Allowed dependencies (examples)
 
 - `actions` → `agentcontrol`, `audit`, `rbac`, `tenancy`, `environments`, `connections`, `discovery` (as needed for orchestration)
 - `records` → `agentcontrol`, `rbac`, `tenancy`, `environments`, `connections`, `discovery`
 - `discovery` → `agentcontrol`, `connections`, `tenancy`, `environments`
-- `agentcontrol` → `tenancy`, `environments`, `connections` (metadata), `audit` (for command lifecycle events as required)
-- `connections` → `tenancy`, `environments`, `agentcontrol` (association only) — **must not** depend on `actions` or `records`
+- `agentcontrol` → `tenancy`, `environments`, `connections`, `audit` (for command lifecycle events as required)
+- `connections` → `tenancy`, `environments` only — **must not** depend on `agentcontrol`, `actions`, or `records`
 - `audit` → minimal dependencies; prefer being called by others; no dependency on `actions` implementation details beyond stable event DTOs
 - `identity` / `tenancy` / `rbac` → foundational; higher modules depend on them, not the reverse for business features
 
-Forbidden / discouraged:
+#### Forbidden / discouraged
 
+- `connections` → `agentcontrol` (cycle; association is data owned by `connections`, orchestration owned by `agentcontrol`)
 - `connections` → `actions` (connection registry must not know Action catalog)
 - Circular dependencies between `actions` ↔ `discovery` ↔ `records` — prefer orchestration via facades in `shared` only when unavoidable
 - Any module importing customer DB drivers or opening customer DB sockets
@@ -159,13 +170,18 @@ flowchart TB
     actions --> audit
     records --> agentcontrol
     discovery --> agentcontrol
+    agentcontrol --> connections
     agentcontrol --> audit
+    connections --> tenancy
+    connections --> environments
   end
   Agent[Customer Agent]
   DB[(Customer Postgres / Mongo)]
   agentcontrol -. outbound session .-> Agent
   Agent --> DB
 ```
+
+**Acyclic rule (CR-PR10-001):** `agentcontrol` → `connections` is allowed; `connections` → `agentcontrol` is **not**.
 
 ### 3.4 Normative environment isolation (SEC-PR10-002)
 
@@ -268,7 +284,7 @@ sequenceDiagram
   Agent->>DB: Validate local credentials (optional connectivity check)
   Agent->>AC: Report connection readiness for connection id (#3)
   Note over Agent: Agent accepts connection only if org/env match its binding
-  AC->>Conn: Update readiness / health metadata (non-secret)
+  AC->>Conn: Update readiness / health metadata via connections module API (agentcontrol → connections; not reverse)
   AC->>Audit: Record connection ready (no secrets in audit payload)
 ```
 
@@ -341,7 +357,9 @@ sequenceDiagram
   Act-->>User: Preview + honest limitation flags (never false authority)
 ```
 
-### 5.6 Action execution (authorization binding + TOCTOU) — SEC-PR10-003 / 004
+### 5.6 Action confirmation + execution (authorization binding + TOCTOU) — SEC-PR10-003 / 004, CR-PR10-004
+
+**Cloud-side confirmation gate (CR-PR10-004):** Cloud **MUST** require an explicit confirmation step, distinct from preview, **before** minting or dispatching the §3.5 mutating authorization binding. Confirmation **MUST** present (or require acknowledgment of) preview limitation / non-authoritative / staleness flags when present. UX chrome is product-owned; the gate itself is architectural.
 
 ```mermaid
 sequenceDiagram
@@ -352,37 +370,57 @@ sequenceDiagram
   participant Audit as Cloud audit
   participant Agent as Agent
   participant DB as Customer DB
-  User->>Act: Confirm execute Action / approved-field edit
-  Note over User,Act: Confirm UX MUST carry preview limitation flags; must not present stale preview as authoritative
+  User->>Act: Explicit confirm (carries preview limitation/staleness flags)
+  Note over User,Act: Confirm is a Cloud gate BEFORE minting §3.5 binding; must not present stale preview as authoritative
   Act->>RBAC: Authorize run permission (define≠run)
-  Act->>Audit: Record execution intent (operation id)
-  Act->>AC: Enqueue execute + Cloud-issued authorization binding (§3.5)
+  Act->>Act: Create operation record (operation_id) lifecycle=pending
+  Act->>Audit: Record execution intent (operation_id, pending)
+  Act->>AC: Mint §3.5 binding + enqueue execute (only after confirm)
   Note over AC,Agent: (#3) encoding of binding; delivery/idempotency; replay resistance (§2.4)
   AC->>Agent: Dispatch execute + binding
   Agent->>Agent: Validate binding (op id, actor, org, env, agent, connection, Action, expiry)
   Agent->>Agent: Reject if invalid/expired/mismatched
   Agent->>DB: Re-validate safety/preconditions (execute-time) OR enforce short-lived preview bind (#3/Actions)
   alt Preconditions fail / state changed unsafely
-    Agent->>AC: Abort with TOCTOU / unsafe result
-    AC->>Act: Correlate failure
+    Agent->>AC: Abort with TOCTOU / unsafe result (durable until Cloud ack — §5.6.1)
+    AC->>Act: Correlate failure by operation_id
+    Act->>Act: lifecycle=failed
     Act->>Audit: Record rejected/failed execution
     Act-->>User: Fail honestly (no silent mutate)
   else Safe to proceed
     Agent->>DB: Apply controlled mutation only
     DB-->>Agent: Result / before-after as available
-    Agent->>AC: Execution result (#3)
-    AC->>Act: Correlate
-    Act->>Audit: Record execution result (correlated operation id)
+    Agent->>Agent: Durably retain result until Cloud ack (§5.6.1)
+    Agent->>AC: Execution result (#3) correlated by operation_id
+    AC->>Act: Correlate; ack to Agent
+    Act->>Act: lifecycle=succeeded or failed
+    Act->>Audit: Record execution result (correlated operation_id)
     Act-->>User: Success / failure
   end
 ```
 
-**TOCTOU normative rules (SEC-PR10-004):**
+**TOCTOU normative rules (SEC-PR10-004) — unchanged / preserved:**
 
 1. Preview **MUST NOT** mutate the customer database.
 2. The confirm/execute path **MUST NOT** tell the user a stale or non-authoritative preview is authoritative.
 3. Execution **MUST** perform **execute-time revalidation** of critical preconditions at the Agent (re-read / safety checks) **OR** an equivalent safe binding between preview and execute (e.g. short-lived preview snapshot token with explicit invalidation). Mechanism detail may be refined by Actions design + Issue #3; the **property is mandatory**.
 4. Residual races after these controls require explicit Founder risk acceptance — not silent ignore.
+
+#### 5.6.1 Operation result durability and reconciliation (CR-PR10-002)
+
+These are **architecture MUST properties**. Concrete transport/retry wire format remains **Issue #3**.
+
+1. **Durable Agent results:** After the Agent applies (or definitively rejects) a mutating command, the Agent **MUST** durably retain the execution result and **retry delivery** to Cloud until Cloud acknowledges receipt (or an Issue #3–defined terminal abandon policy that leaves Cloud in an honest non-success state).
+2. **Stable correlation:** Result correlation **MUST** use the stable Cloud `operation_id` from the §3.5 binding.
+3. **Explicit Cloud lifecycle states:** Cloud **MUST** represent mutating operations with explicit lifecycle states including at least:
+   - `pending` — confirm accepted / binding issued / awaiting terminal result
+   - `succeeded` — terminal success durably known
+   - `failed` — terminal failure durably known
+   - `unknown` / `reconciliation-required` — execution intent exists but no durable terminal result is known
+4. **No silent terminalization:** If execution intent exists but no terminal result is durably known, Cloud **MUST NOT** silently mark `succeeded` or `failed`.
+5. **Reconciliation:** After Agent reconnect or Cloud restart, Cloud and Agent **MUST** be able to reconcile outstanding `pending` / `unknown` operations (mechanism in #3; property mandatory here).
+6. **Duplicate results:** Duplicate result delivery for the same `operation_id` **MUST** be handled safely (idempotent apply of the same terminal outcome).
+7. **Honest audit:** Audit **MUST** represent uncertain/unknown terminal state honestly (e.g. intent recorded as pending; later append/correlate unknown or reconciled terminal event). Intent-only audit is **not** sufficient as a substitute for a missing terminal outcome.
 
 ### 5.7 Audit recording (correlated with every mutation attempt)
 
@@ -397,7 +435,7 @@ sequenceDiagram
   Audit-->>Act: Event id
 ```
 
-Every mutation **attempt** (success, failure, partial, rejected) must produce correlated audit evidence. Rollbacks are separate audited operations linked to the original operation id.
+Every mutation **attempt** (success, failure, partial, rejected, **unknown/reconciliation-required**) must produce correlated audit evidence keyed by `operation_id`. Rollbacks are separate audited operations linked to the original operation id. See §5.6.1 — missing terminal results must not be invented as success/failure.
 
 **SEC-PR10-006 clarification:** “Append-oriented” **MUST** be enforced with **storage-level** controls (DB privileges, triggers, immutability store, or equivalent). Application/UI checks alone are insufficient. Exact mechanism is chosen with domain model (#6) against Security SR-AUDIT-*.
 
@@ -476,6 +514,7 @@ This architecture package is **input** to Security — not Security sign-off.
 | Risk / tradeoff | Notes |
 | --- | --- |
 | **Agent offline** | Discovery/search/actions unavailable; commands queue with TTL/depth/cancel-on-revoke (§5.9) |
+| **Mutation committed, Cloud result lost (CR-PR10-002)** | Mitigated by §5.6.1 durable Agent results, `operation_id` correlation, explicit `pending`/`unknown` lifecycle, reconciliation — never silent success/failure |
 | **Partial execution** | Multi-step Actions need explicit failure semantics and audit of partial outcomes |
 | **Duplicate commands** | (#3) delivery may be at-least-once — idempotency keys and Agent-side dedupe required; replay resistance mandatory (§2.4) |
 | **Schema drift** | Cached Cloud metadata may lag; refresh flows and stale-schema handling needed |
@@ -507,8 +546,12 @@ Implementers and Code Review must satisfy:
 - [ ] Mutating Agent commands carry Cloud-issued authorization bindings with minimum fields in §3.5; Agent rejects invalid/expired/mismatched — SEC-PR10-003
 - [ ] Agent verifies `connection_id` (and org/env) on sensitive commands — SEC-PR10-010
 - [ ] Preview paths are read-only at the Agent/DB boundary
+- [ ] Explicit Cloud-side **confirmation** gate occurs before minting/dispatching the §3.5 mutating authorization binding; preview limitation/staleness flags are visible at confirmation — CR-PR10-004 / SEC-PR10-004
 - [ ] Preview limitation/non-authoritative flags flow to confirm/execute UX; stale preview not presented as authoritative — SEC-PR10-004
 - [ ] Execute performs execute-time revalidation **or** equivalent safe preview↔execute binding — SEC-PR10-004
+- [ ] Agent durably retains/retries execution results until Cloud ack; Cloud correlates by stable `operation_id`; lifecycle includes pending/succeeded/failed/unknown; no silent terminalization; reconciliation after reconnect/restart; duplicate results safe; audit honest about unknown — CR-PR10-002 / §5.6.1
+- [ ] Production is **visually and operationally distinguishable** from non-production in Cloud UX/API — CR-PR10-005 / §3.4
+- [ ] Module dependency graph is **acyclic**; `connections` does not import `agentcontrol`; `agentcontrol` may depend on `connections` — CR-PR10-001
 - [ ] Every mutation attempt is audited with correlation ids; audit append-only with **storage-level** controls; retention design targets ≥1 year — SEC-PR10-006
 - [ ] Rollback offered only when Action declares reversible and safety checks pass
 - [ ] Define vs run Action/approved-field authorities are separate — SEC-PR10-009
@@ -557,9 +600,24 @@ Implementers and Code Review must satisfy:
 
 ---
 
+## 11. Code Review remediation map (PR #10)
+
+| Finding | Severity | Architecture response |
+| --- | --- | --- |
+| CR-PR10-001 | BLOCKING MEDIUM | §3.2 acyclic graph; `connections` owns `agent_id` data without importing `agentcontrol`; `agentcontrol` → `connections`; diagram updated |
+| CR-PR10-002 | BLOCKING MEDIUM | §5.6.1 operation result durability + lifecycle states; §5.7 / §7 / §8 updated; #3 owns wire mechanics |
+| CR-PR10-003 | NON-BLOCKING LOW | Header status reflects Security acknowledgment + Code Review re-review required |
+| CR-PR10-004 | NON-BLOCKING LOW | §5.6 explicit Cloud confirm gate before minting §3.5 binding |
+| CR-PR10-005 | NON-BLOCKING LOW | §8 AC for prod visually/operationally distinguishable |
+
+Security-cleared properties SEC-PR10-001..004 are **preserved** and not reopened by this amendment.
+
+---
+
 ## Document history
 
 | Date | Change |
 | --- | --- |
 | 2026-09-18 | Initial proposed architecture for Issue #2 |
 | 2026-09-19 | Security remediation for SEC-PR10-001..004 + NON-BLOCKING clarifications |
+| 2026-09-19 | Code Review remediation for CR-PR10-001..005 |

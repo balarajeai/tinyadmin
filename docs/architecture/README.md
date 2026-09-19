@@ -6,7 +6,8 @@ Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2
 ## V1 system architecture
 
 - [v1-system-architecture.md](./v1-system-architecture.md) — control plane vs Agent data plane, modular monolith module map, sequences, trust boundaries, risks, acceptance criteria
-- Includes Security remediation for `SEC-PR10-001` … `SEC-PR10-004` (2026-09-19)
+- Security trust-boundary inputs acknowledged (`SEC-PR10-001` … `SEC-PR10-004` CLEARED)
+- Includes Code Review remediation for `CR-PR10-001` … `CR-PR10-005` (2026-09-19)
 
 ## ADRs
 

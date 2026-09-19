@@ -42,7 +42,7 @@ Additionally (architecture §3.4–§3.5, not alternative protocol choices):
 
 - **Positive:** Clear conformance checklist for #3; reduces insecure-by-default risk.
 - **Negative:** #3 scope includes proving each property; may constrain some simpler designs.
-- **Follow-ups:** #3 ADR must include a conformance table mapping each P-* to the chosen mechanism; Security re-reviews PR #10 after this amendment.
+- **Follow-ups:** #3 ADR must include a conformance table mapping each P-* to the chosen mechanism. Security has **acknowledged** Issue #2 trust-boundary inputs (SEC-PR10-001..004 CLEARED on `0eab8da`); this ADR remains a constraint for Issue #3 and does **not** approve #3 mechanisms. Independent Code Review of PR #10 is a separate gate.
 
 ## Related issues
 
