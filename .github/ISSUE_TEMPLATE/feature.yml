@@ -1,0 +1,195 @@
+name: Feature
+description: Propose a new capability or user-facing enhancement.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for new product work.
+
+        A feature is not done because code exists. Record problem, scope, acceptance criteria, and required gates before implementation.
+
+        Do not invent a task ID. Leave it blank if one does not exist yet.
+
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: Existing tracker ID only. Do not invent IDs.
+      placeholder: TA-123
+    validations:
+      required: false
+
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk level
+      description: Classify before implementation. Reclassify if the work expands.
+      options:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is broken or missing for the user or business?
+      placeholder: Users cannot invite a teammate, so they share one login.
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_story
+    attributes:
+      label: User story
+      description: As a [role], I want [capability], so that [outcome].
+      placeholder: As an owner, I want to invite a member, so that each person has their own account.
+    validations:
+      required: true
+
+  - type: textarea
+    id: business_value
+    attributes:
+      label: Business value
+      description: Why this should be built now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is in scope for this change.
+      placeholder: |
+        - Invite a member by email
+        - Owner-only invite permission
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: What this change will not do.
+      placeholder: |
+        - Billing seats
+        - Self-serve signup
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Testable outcomes. A feature is not ready without these.
+      placeholder: |
+        - [ ] An owner can invite a member by email
+        - [ ] The invitee can accept and sign in
+        - [ ] A non-owner cannot invite
+    validations:
+      required: true
+
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture considerations
+      description: Modular monolith first. New service boundaries require Architect approval and an ADR.
+      placeholder: |
+        - [ ] Modular monolith module identified, or service boundary already approved
+        - [ ] Contracts / APIs affected
+        - [ ] Architect review required? Yes / No
+        - ADR or spec links:
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: Authentication, authorization, tenant isolation, sensitive data, and audit needs.
+      placeholder: |
+        - [ ] Authentication
+        - [ ] Authorization / RBAC
+        - [ ] Tenant isolation
+        - [ ] Sensitive data
+        - [ ] Audit need
+        - Security review required? Yes / No
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Database / data considerations
+      description: Schema, backfill, compatibility, and backup or recovery impact.
+      placeholder: |
+        - [ ] Schema change
+        - [ ] Data backfill
+        - [ ] Compatibility during rolling deploy
+        - [ ] Backup / recovery impact
+        - Migration notes:
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Other work, teams, or systems this depends on.
+      placeholder: |
+        | Dependency | Owner | Status |
+        | --- | --- | --- |
+        |  |  |  |
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing requirements
+      description: Happy path, failure paths, boundaries, integration or E2E, and regression.
+      placeholder: |
+        - Happy path:
+        - Failure paths:
+        - Boundary cases:
+        - Integration / E2E:
+        - Regression:
+    validations:
+      required: true
+
+  - type: textarea
+    id: gates
+    attributes:
+      label: Required gates
+      description: Record required gates from the engineering definition of done. Human production approval is required before production.
+      placeholder: |
+        | Gate | Required? | Owner | Status |
+        | --- | --- | --- | --- |
+        | Architect |  |  |  |
+        | QA |  |  |  |
+        | Security |  |  |  |
+        | Code Review |  |  |  |
+        | Human production approval | Yes, before production | Product Owner |  |
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: definition_of_done
+    attributes:
+      label: Definition of done
+      description: This feature is not done because code exists. All applicable items must be true before the work is complete.
+      options:
+        - label: Acceptance criteria are written and testable
+        - label: Implementation will match the agreed scope and no more
+        - label: Tests will be added or updated and actually executed
+        - label: Security, database, and architecture implications are recorded above
+        - label: Required reviews and gates are identified
+        - label: Documentation will be updated where behavior, operations, or contracts change
+        - label: No unresolved release-blocking issues will remain
+        - label: Production will not be deployed without recorded human approval
+    validations:
+      required: false
