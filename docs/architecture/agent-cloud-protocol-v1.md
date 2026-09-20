@@ -18,7 +18,7 @@ This document does **not** claim Security approval, production readiness, or Iss
 | Bootstrap / durable fallback | **HTTPS** enrollment + result/reconciliation POST |
 | Agent identity | Per-Agent **Ed25519** keypair; Cloud stores public key only |
 | Cloud command authenticity | Cloud **signed authorization envelopes** on commands |
-| Delivery | Commands & results **at-least-once**; mutation **effects** exactly-once via `operation_id` idempotency |
+| Delivery | Commands & results **at-least-once**; **no unqualified exactly-once effects**; durable execution state + safe dedupe; `unknown` when indeterminate (SEC-PR12-003) |
 | Addressing | Cloud never dials customer hosts; commands target `agent_id` already connected or waiting in Cloud outbox |
 | Customer DB ports | **Not required** to be public; Cloud never opens 5432/27017 to customers |
 
