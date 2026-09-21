@@ -5,7 +5,7 @@ Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2
 
 ## V1 system architecture
 
-- [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md) — Issue #3 protocol (WSS + signed envelopes), flows, failure modes, AC
+- [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md) — Issue #3 protocol (WSS + signed envelopes); Security PASS; CR re-review pending
 - [v1-system-architecture.md](./v1-system-architecture.md) — control plane vs Agent data plane, modular monolith module map, sequences, trust boundaries, risks, acceptance criteria
 - Security trust-boundary inputs acknowledged (`SEC-PR10-001` … `SEC-PR10-004` CLEARED)
 - Includes Code Review remediation for `CR-PR10-001` … `CR-PR10-005` (2026-09-19)
@@ -24,6 +24,6 @@ Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2
 
 ## Related follow-ons (not this package)
 
-- Issue #3 — Agent↔Cloud protocol (ADR 0007 + [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md)) — Security review required
+- Issue #3 — Agent↔Cloud protocol (ADR 0007 + [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md)) — **Security PASS**; Independent Code Review re-review pending
 - Issue #6 — Domain model
 - Issues #4 / #5 — Security threat model and requirements

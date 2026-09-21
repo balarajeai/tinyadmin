@@ -1,6 +1,6 @@
 # TinyAdmin V1 Agent↔Cloud Protocol
 
-**Status:** Proposed — Security **re-review required** after SEC-PR12-001..003 remediation (CRITICAL); Independent Code Review **not** requested until Security clears BLOCKING items  
+**Status:** Proposed — Issue #3 **Security gate PASS** (SEC-PR12 BLOCKING cleared); **Independent Code Review remediation / re-review pending** (CR-PR12-001..004). Not overall TinyAdmin security approval; not Issues #4/#5/#6 completion; not production readiness.  
 **Governing issue:** [#3](https://github.com/balarajeai/tinyadmin/issues/3)  
 **ADR:** [0007-agent-cloud-protocol-wss.md](./adr/0007-agent-cloud-protocol-wss.md)  
 **Constrains:** [ADR 0006](./adr/0006-cloud-agent-security-properties.md), [v1-system-architecture.md](./v1-system-architecture.md) §2.4 / §3.4–§3.5 / §5.6.1  
@@ -132,7 +132,8 @@ sequenceDiagram
 **Reconnect / backoff (normative expectations):**
 
 - Exponential backoff with jitter after disconnect: start ~1s, cap ~60s.
-- On reconnect: re-authn; **drain Cloud outbox**; **resend unacked results**; reconcile `pending`/`unknown` operations (§7).
+- On reconnect (order is normative — see §8): (1) re-authn / session; (2) Cloud confirms Agent still valid; (3) **authoritative cancel/revoke sync**; (4) Agent records that state and rejects canceled/expired pending mutates; (5) **only then** may eligible pending commands be considered; (6) result reconciliation may proceed without weakening (1)–(5).
+- **MUST NOT** immediately drain/execute mutating work before cancel/revoke sync completes. If sync fails or is incomplete → **fail closed** on mutation execution.
 - Proxy idle timeout: Agent sends heartbeats at ≤ 30s (configurable below proxy limits).
 
 ---
@@ -171,11 +172,35 @@ sequenceDiagram
 **Approach:** Option **B** — Cloud signature covers authorization envelope fields including **`mutation_payload_sha256`**.
 
 1. Cloud builds **canonical mutation payload** object with **exactly** these keys (RFC **8785 JCS**, UTF-8):
-   - `action_or_field_op` — `{ "type":"action", "action_definition_id":"…" }` **or** `{ "type":"approved_field", "approved_field_edit_config_id":"…" }` (rollback: `{ "type":"rollback", "parent_operation_id":"…" }`)
-   - `targets` — structured record selector(s) / identifiers authorized for this operation
-   - `parameters` — requested values / Action parameters
+   - `action_or_field_op` — discriminated object (profiles below)
+   - `targets` — structured record selector(s) / identifiers (profile-specific)
+   - `parameters` — requested values (profile-specific; never arbitrary SQL/Mongo text)
    - `max_affected_records` — integer upper bound authorized for this execution
 2. `mutation_payload_sha256` = SHA-256 over the JCS bytes of that object (hex lowercase encoding in envelope field).
+
+#### 6.1.1 Canonical profiles (execute / field-edit vs rollback) — CR-PR12-002
+
+**A. Action execute** (`command_type=execute` with Action):
+- `action_or_field_op` = `{ "type":"action", "action_definition_id":"<uuid>" }` (exactly these keys)
+- `targets` = non-empty structured selector object/array identifying authorized records (shape defined by Action; must be JSON-only)
+- `parameters` = JSON object of Action parameters (may be `{}` if none)
+- `max_affected_records` = positive integer bound for this operation
+
+**B. Approved-field edit:**
+- `action_or_field_op` = `{ "type":"approved_field", "approved_field_edit_config_id":"<uuid>" }`
+- `targets` = non-empty structured selector for records to edit
+- `parameters` = JSON object including the authorized new field value(s) under stable keys defined by the config
+- `max_affected_records` = positive integer bound for this operation
+
+**C. Rollback (frozen V1 profile):**
+- `action_or_field_op` = `{ "type":"rollback", "parent_operation_id":"<original operation_id>" }` — **exactly** these two keys; `parent_operation_id` is part of signed/digested mutation intent
+- `targets` = **exact copy** of the parent operation’s authorized `targets` (same JCS bytes as parent canonical `targets`). Agent **MUST** reject if targets are empty, omitted, invented, or not equal to the parent’s authorized target set known from the parent operation record / prior digest inputs Cloud provides in the rollback command context
+- `parameters` = **canonical empty object** `{}` (no user parameters in V1). Engine-specific rollback inputs are **not** represented as free-form parameters; if an engine needs reverse values, they come from audited parent `before_state` / Agent-local eligibility data **outside** expanding `parameters`. Unknown keys in `parameters` → fail closed
+- `max_affected_records` = integer **equal to** the parent operation’s authorized `max_affected_records` (MUST NOT exceed parent). Agent **MUST** reject if greater than parent’s authorized limit
+
+Rollback remains **conditional**, separately authorized and audited. This protocol profile does **not** replace Issue #6 domain schema tables.
+
+Agent **MUST** reject rollback payloads that do not match profile **C** exactly under JCS (after parsing), preserving SEC-PR12-001 digest integrity.
 3. **Envelope fields signed by Cloud** (JCS of envelope body excluding `signature`), minimum:
    - `kid`, `operation_id`, `actor_id`, `organization_id`, `environment_id`, `agent_id`, `connection_id`
    - `action_or_field_op` (same identity as payload)
@@ -249,27 +274,61 @@ sequenceDiagram
   Note over Agent,Cloud: Ignore unauthenticated acks; retry until authenticated ack; never drop mutate result silently
 ```
 
-**HTTPS fallback:** `POST /agent/v1/results` with Agent signature over body, same rules — required so result delivery is not stranded on WS-only failures.
+**HTTPS fallback (CR-PR12-004):** `POST /agent/v1/results` with Agent signature over body — required so result delivery is not stranded on WS-only failures.
 
-**`result_ack` authenticity (SEC-PR12-005):** Cloud acknowledgments **MUST** be authenticated (Cloud-signed or equivalently bound to the authenticated Cloud session) and include `operation_id`. Agent **MUST** ignore unauthenticated acks.
+- **HTTP success status alone is NOT sufficient acknowledgment.**
+- The HTTPS response body **MUST** contain an authenticated `result_ack` (or equivalent Cloud-authenticated acknowledgment) correlated to `operation_id`, with the **same acknowledgment semantics** as the WSS path.
+- Agent **MUST NOT** delete/clear its durable result until that authenticated ack is verified.
+- Unauthenticated or malformed ack → treat as no ack; **retry remains required**.
+
+**`result_ack` authenticity (SEC-PR12-005):** Cloud acknowledgments **MUST** be authenticated (Cloud-signed or equivalently bound to the authenticated Cloud session) and include `operation_id`. Agent **MUST** ignore unauthenticated acks (WSS or HTTPS).
 
 **Abandon policy:** Only after Cloud marks operation `unknown`/`failed` with audited reason **and** Security/ops policy allows stopping Agent retries (e.g. retention exceeded). Default V1: Agent retains mutate results ≥ **7 days** or until ack.
 
 ---
 
-## 8. Reconnect / reconciliation flow
+## 8. Reconnect / reconciliation flow (CR-PR12-001)
+
+Normative order on every reconnect (must agree with §5, §9, and §13):
+
+1. Agent authenticates / re-establishes session.
+2. Cloud determines whether Agent identity is still valid (not revoked).
+3. Cloud sends **authoritative cancel/revoke synchronization state** relevant to the Agent (minimal conceptual representation):
+   - `agent_revoked` (boolean)
+   - `canceled_operation_ids[]`
+   - optional `authorization_invalidation_version` / epoch marker
+4. Agent records/processes that state (durable recommended).
+5. Agent **MUST** reject/discard canceled, revoked, or expired pending mutates.
+6. **Only after** steps 1–5 may eligible pending commands be considered / drained for execution.
+7. Result reconciliation (unacked results / `unknown` ops) **MAY** proceed in parallel with or after step 3 **without** allowing mutation execution before steps 1–5 complete.
 
 ```mermaid
 sequenceDiagram
   participant Agent
   participant Cloud
-  Agent->>Cloud: Re-authn WSS
-  Agent->>Cloud: reconcile_hello(unacked_result_operation_ids[], protocol_version)
-  Cloud->>Agent: pending_commands[] (outbox drain) + request_results_for[] (pending/unknown ops)
-  Agent->>Cloud: result_report for each known local result
-  Cloud-->>Agent: result_ack(s)
-  Cloud->>Cloud: Ops still missing after timeout remain unknown / reconciliation-required (honest)
+  Agent->>Cloud: Re-authn WSS (session challenge)
+  Cloud->>Cloud: Verify Agent identity still valid
+  alt Agent revoked
+    Cloud-->>Agent: session denied / agent_revoked=true
+    Note over Agent: Fail closed; no mutate execution
+  else Agent valid
+    Cloud-->>Agent: session_ok
+    Agent->>Cloud: reconcile_hello(unacked_result_operation_ids[], protocol_version)
+    Cloud->>Agent: cancel_revoke_sync(agent_revoked=false, canceled_operation_ids[], authz_epoch)
+    Agent->>Agent: Record cancel/revoke state; discard canceled/expired pending mutates
+    Note over Agent: MUST NOT execute mutates before sync applied
+    Cloud->>Agent: request_results_for[] (pending/unknown ops)
+    Agent->>Cloud: result_report for each known local result
+    Cloud-->>Agent: authenticated result_ack(s)
+    Cloud->>Agent: pending_commands[] eligible only (outbox drain after sync)
+    Note over Agent: Pre-exec validity still required (§6.2 / §9)
+    Cloud->>Cloud: Ops still missing after timeout remain unknown / reconciliation-required (honest)
+  end
 ```
+
+**Fail closed:** If cancel/revoke synchronization fails or is incomplete, Agent **MUST NOT** execute pending mutations (result reporting may still retry where safe).
+
+**Already committed** customer-DB mutations are **not** reversed by cancel/revoke sync.
 
 Cloud **MUST NOT** invent `succeeded`/`failed` when intent exists without durable terminal result.
 
@@ -298,7 +357,7 @@ sequenceDiagram
 2. Agent **MUST** track revocation and per-`operation_id` cancellation state (durable recommended).
 3. Mutating commands **already delivered** but **not yet executed** **MUST** be cancelable; Agent **MUST NOT** execute after relevant Agent/Action/auth revocation or cancel is known.
 4. Agent **MUST** check command validity **immediately before** execution (signature still valid only if not expired; not canceled; session/authz still acceptable per policy).
-5. On **reconnect**, Agent **MUST** re-establish current authorization/session state, pull/process cancels, and only then consider pending mutates.
+5. On **reconnect**, Agent **MUST** follow §8 ordering: re-authn → validity → **authoritative cancel/revoke sync** → record/process → discard canceled/expired → **only then** consider eligible pending mutates. Result reconciliation must not bypass this order.
 6. **Expired** authorization envelopes **MUST** be discarded (not executed).
 7. **Canceled** `operation_id` **MUST NOT** be executed.
 8. **Envelope TTL policy class:** mutating authorization is **short-lived** (minutes-scale class). Outbox may retain commands longer for delivery attempts, but execute authority ends at `exp`. Exact minutes are Platform/Security tunable; V1 must not rely on long-lived offline execute authority.
@@ -375,9 +434,10 @@ Also: permission/Action revoke cancels matching Cloud-outbox and Agent-delivered
 - [ ] Mutating envelope includes `mutation_payload_sha256` over JCS canonical payload; Agent verifies digest+signature and fail-closes on mismatch (SEC-PR12-001)
 - [ ] Delivered-but-unexecuted mutates cancelable; pre-exec validity; short-lived envelope TTL class; reconnect revalidates before execute (SEC-PR12-002)
 - [ ] `kid` required; unknown key rejected; authenticated `result_ack`; bounded clock-skew fail-closed (SEC-PR12-004/005/006)
-- [ ] Results durable on Agent; retry until Cloud `result_ack`; HTTPS result fallback exists
+- [ ] Results durable on Agent; retry until authenticated Cloud `result_ack`; HTTPS response MUST carry authenticated `result_ack` (HTTP 2xx alone insufficient); WSS and HTTPS ack semantics equivalent (CR-PR12-004 / SEC-PR12-005)
 - [ ] Cloud operation lifecycle includes pending/succeeded/failed/unknown; no silent terminalization
-- [ ] Reconnect drains outbox and reconciles results
+- [ ] Reconnect **MUST** sync authoritative cancel/revoke state **before** any pending mutate execution; fail closed if sync incomplete; then eligible outbox drain + result reconcile (CR-PR12-001)
+- [ ] Rollback canonical profile C frozen (`type=rollback`, `parent_operation_id`, targets=parent copy, `parameters={}`, `max_affected_records`=parent bound); Agent rejects mismatches (CR-PR12-002)
 - [ ] Outbox depth + TTL; cancel on revoke; fail closed on overflow for mutates
 - [ ] Rotation and revocation audited; DB secrets never in Cloud
 - [ ] Protocol version negotiation fail-closed
@@ -446,9 +506,23 @@ ADR 0006 P-* properties preserved (outbound-only, TLS, Agent identity, org/env b
 
 ---
 
+## 17. Code Review remediation map (PR #12)
+
+| ID | Severity | Response |
+| --- | --- | --- |
+| CR-PR12-001 | BLOCKING | §5/§8/§9/§13: reconnect cancel/revoke sync before pending mutates; fail closed if incomplete |
+| CR-PR12-002 | BLOCKING | §6.1.1 profile C: frozen rollback canonical digest inputs |
+| CR-PR12-003 | NON-BLOCKING | Status reflects Security PASS + CR re-review pending |
+| CR-PR12-004 | NON-BLOCKING | HTTPS result POST requires authenticated `result_ack` in response |
+
+**Security impact:** Precision/coherence only. Does not weaken P-* or cleared SEC-PR12 BLOCKING properties. **Security PASS remains applicable.** Independent Code Review re-review requested (no Security re-review requested for this amendment).
+
+---
+
 ## Document history
 
 | Date | Change |
 | --- | --- |
 | 2026-09-19 | Initial Issue #3 protocol selection + flows |
 | 2026-09-19 | Security remediation SEC-PR12-001..003 (+004/005/006/008 clarifications) |
+| 2026-09-20 | Code Review remediation CR-PR12-001..004 |
