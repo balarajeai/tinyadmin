@@ -88,6 +88,7 @@ func run(configPath string, logger *slog.Logger) error {
 		cfg.Cloud.ReconnectBaseDelay,
 		cfg.Cloud.ReconnectMaxDelay,
 		cfg.Cloud.HeartbeatInterval,
+		store,
 		logger,
 	)
 
@@ -108,10 +109,6 @@ func run(configPath string, logger *slog.Logger) error {
 
 	if err := cloudClient.Start(); err != nil {
 		return fmt.Errorf("failed to start cloud client: %w", err)
-	}
-
-	if err := cloudClient.RetryUnackedResults(store); err != nil {
-		logger.Warn("failed to retry unacked results on startup", "error", err)
 	}
 
 	logger.Info("agent running")

@@ -26,6 +26,7 @@ type Client struct {
 	reconnectMaxDelay  time.Duration
 	heartbeatInterval  time.Duration
 	logger             *slog.Logger
+	store              *storage.Store
 
 	conn        *websocket.Conn
 	connMu      sync.Mutex
@@ -33,7 +34,7 @@ type Client struct {
 	commandHandler func(context.Context, *protocol.Command) (*protocol.ResultMessage, error)
 	cancelRevokeHandler func([]string) error
 	
-	resultQueue chan *protocol.ResultMessage
+	resultWake chan struct{}
 	
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -44,6 +45,7 @@ func NewClient(
 	endpoint string,
 	agentID string,
 	reconnectBaseDelay, reconnectMaxDelay, heartbeatInterval time.Duration,
+	store *storage.Store,
 	logger *slog.Logger,
 ) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,7 +57,8 @@ func NewClient(
 		reconnectMaxDelay:  reconnectMaxDelay,
 		heartbeatInterval:  heartbeatInterval,
 		logger:             logger,
-		resultQueue:        make(chan *protocol.ResultMessage, 100),
+		store:              store,
+		resultWake:         make(chan struct{}, 1),
 		ctx:                ctx,
 		cancel:             cancel,
 	}
@@ -88,12 +91,10 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-func (c *Client) QueueResult(result *protocol.ResultMessage) {
+func (c *Client) WakeResultSender() {
 	select {
-	case c.resultQueue <- result:
-	case <-c.ctx.Done():
+	case c.resultWake <- struct{}{}:
 	default:
-		c.logger.Warn("result queue full, dropping result", "operation_id", result.OperationID)
 	}
 }
 
@@ -334,7 +335,7 @@ func (c *Client) handleCommandMessage(ctx context.Context, msgBytes []byte) erro
 	}
 	
 	if result != nil {
-		c.QueueResult(result)
+		c.WakeResultSender()
 	}
 	
 	return nil
@@ -346,7 +347,17 @@ func (c *Client) handleResultAck(msgBytes []byte) error {
 		return fmt.Errorf("failed to unmarshal result_ack: %w", err)
 	}
 	
-	c.logger.Info("received result_ack", "operation_id", ack.OperationID)
+	if !ack.Acknowledged {
+		c.logger.Warn("received negative result_ack", "operation_id", ack.OperationID)
+		return nil
+	}
+	
+	if err := c.store.DeleteUnackedResult(ack.OperationID); err != nil {
+		c.logger.Error("failed to delete unacked result", "operation_id", ack.OperationID, "error", err)
+		return fmt.Errorf("failed to delete unacked result: %w", err)
+	}
+	
+	c.logger.Info("cleared unacked result", "operation_id", ack.OperationID)
 	
 	return nil
 }
@@ -371,6 +382,13 @@ func (c *Client) heartbeatLoop(ctx context.Context) error {
 	ticker := time.NewTicker(c.heartbeatInterval)
 	defer ticker.Stop()
 	
+	safePollTicker := time.NewTicker(60 * time.Second)
+	defer safePollTicker.Stop()
+	
+	if err := c.sendPendingResults(); err != nil {
+		c.logger.Warn("initial pending results send failed", "error", err)
+	}
+	
 	for {
 		select {
 		case <-ctx.Done():
@@ -379,10 +397,13 @@ func (c *Client) heartbeatLoop(ctx context.Context) error {
 			if err := c.sendHeartbeat(); err != nil {
 				return fmt.Errorf("heartbeat failed: %w", err)
 			}
-		case result := <-c.resultQueue:
-			if err := c.sendResult(result); err != nil {
-				c.logger.Error("failed to send result", "error", err, "operation_id", result.OperationID)
-				c.QueueResult(result)
+		case <-c.resultWake:
+			if err := c.sendPendingResults(); err != nil {
+				c.logger.Warn("pending results send failed", "error", err)
+			}
+		case <-safePollTicker.C:
+			if err := c.sendPendingResults(); err != nil {
+				c.logger.Warn("safety poll results send failed", "error", err)
 			}
 		}
 	}
@@ -405,28 +426,24 @@ func (c *Client) sendHeartbeat() error {
 	return conn.WriteJSON(msg)
 }
 
-func (c *Client) sendResult(result *protocol.ResultMessage) error {
+func (c *Client) sendPendingResults() error {
+	unacked, err := c.store.GetUnackedResults()
+	if err != nil {
+		return fmt.Errorf("failed to get unacked results: %w", err)
+	}
+	
+	if len(unacked) == 0 {
+		return nil
+	}
+	
+	c.logger.Info("sending pending results", "count", len(unacked))
+	
 	c.connMu.Lock()
 	conn := c.conn
 	c.connMu.Unlock()
 	
 	if conn == nil {
 		return errors.New("no connection")
-	}
-	
-	if err := conn.WriteJSON(result); err != nil {
-		return fmt.Errorf("failed to send result: %w", err)
-	}
-	
-	c.logger.Info("sent result", "operation_id", result.OperationID, "status", result.Status)
-	
-	return nil
-}
-
-func (c *Client) RetryUnackedResults(store *storage.Store) error {
-	unacked, err := store.GetUnackedResults()
-	if err != nil {
-		return fmt.Errorf("failed to get unacked results: %w", err)
 	}
 	
 	for _, ur := range unacked {
@@ -436,8 +453,12 @@ func (c *Client) RetryUnackedResults(store *storage.Store) error {
 			continue
 		}
 		
-		c.logger.Info("retrying unacked result", "operation_id", ur.OperationID)
-		c.QueueResult(&result)
+		if err := conn.WriteJSON(result); err != nil {
+			c.logger.Error("failed to send result", "error", err, "operation_id", result.OperationID)
+			return fmt.Errorf("failed to send result: %w", err)
+		}
+		
+		c.logger.Info("sent result", "operation_id", result.OperationID, "status", result.Status)
 	}
 	
 	return nil
