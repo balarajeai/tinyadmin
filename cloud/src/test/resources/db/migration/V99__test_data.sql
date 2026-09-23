@@ -27,3 +27,16 @@ VALUES ('00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-0000000
         '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000003',
         'Test PostgreSQL Connection', 'POSTGRESQL', 'DB_SECRET_REF', 'READY', NOW(), NOW())
 ON CONFLICT DO NOTHING;
+
+-- Test Action Definition (Unlock User)
+-- Fixed UUID that tests expect, bound to test org
+INSERT INTO action_definitions (id, organization_id, key, name, description, status,
+                               requires_confirmation, production_extra_confirm, max_affected_records,
+                               rollback_policy, effect_definition, created_at, updated_at)
+VALUES ('00000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000001',
+        'unlock-user', 'Unlock User', 
+        'Unlocks a locked user account by setting locked=false',
+        'ENABLED', true, true, 1, 'CONDITIONAL',
+        '{"table":"users","fields":{"locked":{"from":true,"to":false}}}',
+        NOW(), NOW())
+ON CONFLICT DO NOTHING;
