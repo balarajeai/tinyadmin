@@ -57,15 +57,26 @@ public class OperationService {
             .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
         Environment env = environmentRepository.findById(environmentId)
             .orElseThrow(() -> new IllegalArgumentException("Environment not found"));
+        
+        if (!env.getOrganization().getId().equals(organizationId)) {
+            throw new SecurityException("Environment does not belong to organization");
+        }
+        
         Agent agent = agentRepository.findByIdAndOrganizationIdAndEnvironmentId(agentId, organizationId, environmentId)
-            .orElseThrow(() -> new IllegalArgumentException("Agent not found or does not belong to org/env"));
+            .orElseThrow(() -> new SecurityException("Agent not found or does not belong to org/env"));
+        
         Connection conn = connectionRepository.findByIdAndOrganizationIdAndEnvironmentId(connectionId, organizationId, environmentId)
-            .orElseThrow(() -> new IllegalArgumentException("Connection not found or does not belong to org/env"));
+            .orElseThrow(() -> new SecurityException("Connection not found or does not belong to org/env"));
+        
+        if (!conn.getAgent().getId().equals(agentId)) {
+            throw new SecurityException("Connection does not belong to specified Agent");
+        }
+        
         ActionDefinition action = actionDefinitionRepository.findById(actionDefinitionId)
             .orElseThrow(() -> new IllegalArgumentException("Action not found"));
         
         if (!action.getOrganization().getId().equals(organizationId)) {
-            throw new IllegalArgumentException("Action does not belong to organization");
+            throw new SecurityException("Action does not belong to organization");
         }
         
         Operation operation = Operation.builder()
@@ -194,12 +205,14 @@ public class OperationService {
         actionOrFieldOp.put("type", "action");
         actionOrFieldOp.put("action_definition_id", operation.getActionDefinition().getId().toString());
         
+        int maxAffected = operation.getActionDefinition().getMaxAffectedRecords() != null ? 
+            operation.getActionDefinition().getMaxAffectedRecords() : 1;
+        
         Map<String, Object> mutationPayload = new LinkedHashMap<>();
         mutationPayload.put("action_or_field_op", actionOrFieldOp);
         mutationPayload.put("targets", parseJson(operation.getTarget()));
         mutationPayload.put("parameters", operation.getParameters() != null ? parseJson(operation.getParameters()) : Map.of());
-        mutationPayload.put("max_affected_records", operation.getActionDefinition().getMaxAffectedRecords() != null ? 
-            operation.getActionDefinition().getMaxAffectedRecords() : 1);
+        mutationPayload.put("max_affected_records", maxAffected);
         
         SignedCommand command = commandSigningService.createSignedCommand(
             operation.getId(),
@@ -208,10 +221,9 @@ public class OperationService {
             operation.getAgent().getId(),
             operation.getConnection().getId(),
             actorUserId,
-            serializeToJson(actionOrFieldOp),
+            actionOrFieldOp,
             mutationPayload,
-            operation.getActionDefinition().getMaxAffectedRecords() != null ? 
-                operation.getActionDefinition().getMaxAffectedRecords() : 1
+            maxAffected
         );
         
         log.info("Signed command created: operationId={}", operationId);

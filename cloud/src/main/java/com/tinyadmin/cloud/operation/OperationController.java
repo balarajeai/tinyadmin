@@ -101,11 +101,32 @@ public class OperationController {
     }
     
     @GetMapping("/{operationId}")
-    public ResponseEntity<Operation> getOperation(
+    public ResponseEntity<OperationResponse> getOperation(
         @PathVariable UUID operationId,
         @RequestParam UUID organizationId
     ) {
         Operation operation = operationService.getOperation(organizationId, operationId);
-        return ResponseEntity.ok(operation);
+        
+        OperationResponse response = OperationResponse.builder()
+            .id(operation.getId())
+            .organizationId(operation.getOrganization().getId())
+            .environmentId(operation.getEnvironment().getId())
+            .agentId(operation.getAgent() != null ? operation.getAgent().getId() : null)
+            .connectionId(operation.getConnection() != null ? operation.getConnection().getId() : null)
+            .actorUserId(operation.getActorUserId())
+            .kind(operation.getKind())
+            .actionDefinitionId(operation.getActionDefinition() != null ? operation.getActionDefinition().getId() : null)
+            .target(operation.getTarget())
+            .parameters(operation.getParameters())
+            .lifecycleStatus(operation.getLifecycleStatus())
+            .previewId(operation.getPreviewId())
+            .confirmationId(operation.getConfirmationId())
+            .parentOperationId(operation.getParentOperationId())
+            .createdAt(operation.getCreatedAt())
+            .updatedAt(operation.getUpdatedAt())
+            .terminalAt(operation.getTerminalAt())
+            .build();
+        
+        return ResponseEntity.ok(response);
     }
 }

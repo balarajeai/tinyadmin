@@ -61,6 +61,8 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        
+        <!-- Jackson for JSON processing with canonical configuration -->
 
         <!-- Test Dependencies -->
         <dependency>
