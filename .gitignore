@@ -1,0 +1,43 @@
+# OS and Editor
+.DS_Store
+.idea/
+.vscode/
+*~
+*.swp
+*.swo
+
+# Node.js
+node_modules/
+.next/
+dist/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Java / Maven / Gradle
+target/
+build/
+.gradle/
+*.class
+*.jar
+!gradle-wrapper.jar
+
+# Go
+bin/
+vendor/
+
+# Environment and Secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+secrets/
+
+# IDE and Test Caches
+.cache/
+.pytest_cache/
+__pycache__/
+*.pyc
