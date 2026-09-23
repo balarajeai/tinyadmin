@@ -195,6 +195,8 @@ This table maps each security-critical invariant to its preferred evidence level
 | **Discovery/search authorized** | API + Integration | SR-DISCOVERY-001 | **YES** |
 | **Revoke cancels pending mutates** | Integration + Agent Integration | SR-AUTHZ-002 | **YES** |
 
+**Test assertion binding:** Tests and evidence MUST assert against the exact SR-* requirement IDs from Issue #5 (e.g., SR-TENANT-001, SR-AUTHZ-002) and, where applicable, the exact V1 Audit Event Catalog event-type strings from SR-AUDIT-001 (e.g., `mutation_succeeded`, `mutation_unknown`, `preview_completed`) rather than paraphrased aliases. This ensures traceability and prevents verification drift from established requirements.
+
 **Principle:** Every security-critical invariant needs at least one automated test at the appropriate level. Happy-path alone is NOT sufficient; negative paths required (see §6).
 
 ---
@@ -277,7 +279,7 @@ Evidence that MUST exist before the vertical slice can be considered verified:
 | 2 | Cloud never receives or stores customer DB passwords | Schema Review + API test | NOT TESTED |
 | 3 | Agent bound to exactly one org + one env | API + Integration | NOT TESTED |
 | 4 | Connection configured with org/env/agent binding | API + Integration | NOT TESTED |
-| 5 | Discovery executed; `test_users` schema cached | Agent Integration | NOT TESTED |
+| 5 | Discovery executed; `test_users` schema cached in Cloud | Agent Integration + Integration/API | NOT TESTED |
 | 6 | Search for locked users returns expected records | Agent Integration + API | NOT TESTED |
 | 7 | Preview shows locked=true → false transition | Agent Integration | NOT TESTED |
 | 8 | Preview does NOT mutate DB (checksum unchanged) | Agent Integration | NOT TESTED |
@@ -469,6 +471,7 @@ The following MUST NOT appear in Cloud:
 | Cloud signing keys | Platform: KMS or secure secret store (ops verification); not in Cloud DB or logs | Platform + Schema |
 | Session secrets | Secure session store (Redis or DB encrypted); not in logs or responses | Integration + Log Scan |
 | Audit/result secrets | Redaction middleware strips secrets from audit before/after; fixture tests assert no raw secrets in audit rows | Integration |
+| Outbound-only / no public DB ports | Platform evidence: Agent initiates outbound connection; customer DB need not expose public `5432`/`27017` to TinyAdmin Cloud (aligns with SR-SECRETS-001 architecture/platform split) | Platform + Architecture conformance |
 
 ### 10.3 Automated scanning
 
