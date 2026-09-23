@@ -12,6 +12,7 @@ agent/
 ├── internal/
 │   ├── config/                # Configuration validation
 │   ├── identity/              # Ed25519 keypair management
+│   ├── cloud/                 # WebSocket Cloud client with TLS
 │   ├── protocol/              # Message types, JCS canonicalization, signature verification
 │   ├── connection/            # Connection allowlist resolution
 │   ├── postgres/              # PostgreSQL client and operations
@@ -191,12 +192,13 @@ Terminal states are persisted durably. `unknown` is used when outcome is indeter
 ## Limitations
 
 - **MongoDB**: Out of scope for this issue (PostgreSQL only)
-- **WSS connection**: Placeholder; full Cloud integration requires backend implementation
+- **Cloud backend**: Requires backend Issue #18 for full end-to-end testing
 - **Multiple actions**: Only Unlock User implemented
 - **Rollback**: Not implemented in this slice
 
 ## Dependencies
 
+- `github.com/gorilla/websocket` - WebSocket client for Cloud connection
 - `github.com/lib/pq` - PostgreSQL driver
 - `github.com/mattn/go-sqlite3` - SQLite for durable storage
 - `gopkg.in/yaml.v3` - YAML configuration parsing

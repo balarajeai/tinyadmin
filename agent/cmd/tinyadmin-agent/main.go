@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/balarajeai/tinyadmin/agent/internal/cloud"
 	"github.com/balarajeai/tinyadmin/agent/internal/config"
 	"github.com/balarajeai/tinyadmin/agent/internal/connection"
 	"github.com/balarajeai/tinyadmin/agent/internal/identity"
 	"github.com/balarajeai/tinyadmin/agent/internal/operation"
+	"github.com/balarajeai/tinyadmin/agent/internal/protocol"
 	"github.com/balarajeai/tinyadmin/agent/internal/storage"
 )
 
@@ -80,27 +82,57 @@ func run(configPath string, logger *slog.Logger) error {
 		logger,
 	)
 
-	logger.Info("agent initialized successfully")
+	cloudClient := cloud.NewClient(
+		cfg.Cloud.Endpoint,
+		cfg.Agent.ID,
+		cfg.Cloud.ReconnectBaseDelay,
+		cfg.Cloud.ReconnectMaxDelay,
+		cfg.Cloud.HeartbeatInterval,
+		logger,
+	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	cloudClient.SetCommandHandler(func(ctx context.Context, cmd *protocol.Command) (*protocol.ResultMessage, error) {
+		result, err := opMgr.HandleCommand(ctx, cmd)
+		if err != nil {
+			logger.Error("command handling failed", "error", err)
+			return nil, err
+		}
+		return result, nil
+	})
+
+	cloudClient.SetCancelRevokeHandler(func(cancelledOps []string) error {
+		return opMgr.ProcessCancelRevoke(cancelledOps)
+	})
+
+	logger.Info("starting cloud connection")
+
+	if err := cloudClient.Start(); err != nil {
+		return fmt.Errorf("failed to start cloud client: %w", err)
+	}
+
+	if err := cloudClient.RetryUnackedResults(store); err != nil {
+		logger.Warn("failed to retry unacked results on startup", "error", err)
+	}
+
+	logger.Info("agent running")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		logger.Info("received shutdown signal")
-		cancel()
-	}()
+	<-sigChan
+	logger.Info("received shutdown signal")
 
-	logger.Info("agent running (press Ctrl+C to stop)")
-	
-	<-ctx.Done()
-	
-	logger.Info("agent shutting down")
+	logger.Info("stopping cloud client")
+	if err := cloudClient.Stop(); err != nil {
+		logger.Error("error stopping cloud client", "error", err)
+	}
 
-	_ = opMgr
+	logger.Info("closing storage")
+	if err := store.Close(); err != nil {
+		logger.Error("error closing storage", "error", err)
+	}
+
+	logger.Info("agent shutdown complete")
 
 	return nil
 }
