@@ -6,6 +6,7 @@ Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2
 ## V1 system architecture
 
 - [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md) — Issue #3 protocol (WSS + signed envelopes); Security PASS; CR re-review pending
+- [domain/v1-domain-model.md](./domain/v1-domain-model.md) — Issue #6 V1 domain model outline (Cloud control plane)
 - [v1-system-architecture.md](./v1-system-architecture.md) — control plane vs Agent data plane, modular monolith module map, sequences, trust boundaries, risks, acceptance criteria
 - Security trust-boundary inputs acknowledged (`SEC-PR10-001` … `SEC-PR10-004` CLEARED)
 - Includes Code Review remediation for `CR-PR10-001` … `CR-PR10-005` (2026-09-19)
@@ -21,9 +22,10 @@ Governing Architect issue: [#2](https://github.com/balarajeai/tinyadmin/issues/2
 | [0005](./adr/0005-cloud-stack-java-spring.md) | Cloud stack: Java 21+ / Spring Boot |
 | [0006](./adr/0006-cloud-agent-security-properties.md) | Mandatory Cloud↔Agent security properties (#3 constraints) |
 | [0007](./adr/0007-agent-cloud-protocol-wss.md) | Agent↔Cloud protocol: WSS + signed envelopes (#3) |
+| [0008](./adr/0008-v1-domain-model-outline.md) | V1 domain model outline location (#6) |
 
 ## Related follow-ons (not this package)
 
 - Issue #3 — Agent↔Cloud protocol (ADR 0007 + [agent-cloud-protocol-v1.md](./agent-cloud-protocol-v1.md)) — **Security PASS**; Independent Code Review re-review pending
-- Issue #6 — Domain model
+- Issue #6 — Domain model ([domain/v1-domain-model.md](./domain/v1-domain-model.md); ADR 0008) — Security + Code Review required
 - Issues #4 / #5 — Security threat model and requirements
