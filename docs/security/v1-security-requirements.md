@@ -70,10 +70,10 @@ Mitigation provenance uses Issue #4 states:
 #### SR-AUTHZ-002
 | | |
 | --- | --- |
-| **REQUIREMENT** | Cloud SHALL re-evaluate active membership status and required permissions on **every** sensitive API that creates previews, confirmations, mutation authorizations, rollbacks, Agent enrollment intents, or Connection/Action configuration changes. Disabled users and revoked memberships SHALL NOT continue privileged operations. Where feasible, Cloud SHALL cancel undelivered/unexecuted mutating outbox items for that actor after revoke. |
-| **OWNER** | Backend |
+| **REQUIREMENT** | Cloud SHALL re-evaluate active membership status and required permissions on **every** sensitive API that creates previews, confirmations, mutation authorizations, rollbacks, Agent enrollment intents, or Connection/Action configuration changes. Disabled users and revoked memberships SHALL NOT continue privileged operations. On authorization invalidation (membership revoke, disable, permission revoke), Cloud SHALL cancel undelivered mutating commands associated with that invalidated authorization when they have not yet been dispatched to the Agent. Regardless of queue or delivery state, Cloud and Agent SHALL reject mutation execution if the authorization is no longer valid at the pre-mutation authorization check (Issue #3 command verification / cancel-revoke sync). There is **no** “not feasible” exception that permits mutation under revoked or disabled authorization. |
+| **OWNER** | Backend + Agent |
 | **THREAT / SOURCE** | TM-AUTH-003 |
-| **VERIFICATION** | After membership revoke mid-session, subsequent mutate mint returns deny; undelivered mutate commands for that actor are cancelled or rejected. |
+| **VERIFICATION** | (1) After membership revoke mid-session, subsequent preview/confirm/mutate-mint APIs return deny. (2) Undelivered mutating outbox items for that actor are cancelled before dispatch (assert cancelled state). (3) If a mutating command was already delivered, Agent rejects execution after revoke/cancel sync and Cloud does not accept a success fabricated without Agent authorization. Pass requires all three. |
 
 #### SR-AUTHZ-003
 | | |
@@ -101,7 +101,7 @@ Mitigation provenance uses Issue #4 states:
 | **REQUIREMENT** | Frontend SHALL clearly identify **PRODUCTION** environment on confirmation UX for mutating operations. Cloud SHALL still refuse mutation authorization without a valid Confirmation record even if the client omits production UI steps. |
 | **OWNER** | Frontend + Backend |
 | **THREAT / SOURCE** | TM-PREVIEW-003; TM-ENV-001 |
-| **VERIFICATION** | UI review checklist for production badge/copy; API test: mutate mint without Confirmation is rejected regardless of client flags. |
+| **VERIFICATION** | **Automated (blocking for mutate path):** API test — mutate mint without a valid Confirmation is rejected regardless of client flags. **Manual (non-blocking for this Issue #5 docs gate):** production visual distinction SHALL be verified against a named manual QA evidence item defined in Issue #7 (verification strategy). Until Issue #7 publishes that evidence item ID, record interim evidence as `QA-EVIDENCE-ENV-PROD-UX` on the relevant frontend PR. |
 
 ---
 
@@ -230,10 +230,46 @@ Mitigation provenance uses Issue #4 states:
 #### SR-AUDIT-001
 | | |
 | --- | --- |
-| **REQUIREMENT** | Cloud SHALL append audit events for mutation attempts and terminal results (including rejects where required for security forensics), previews at least when they gate production mutations, confirmations, rollbacks, Agent enrollment/revocation, and authorization failures on sensitive mutate paths. Minimum fields: actor, organization, environment, operation ID (when applicable), Action/config identity, target summary, timestamp, result/status, rollback relationship when applicable. Before/after images SHALL be included where appropriate and after redaction (SR-REDACT-001). |
+| **REQUIREMENT** | Cloud SHALL append audit events according to the **V1 Audit Event Catalog** below. Events SHALL be append-only records (see SR-AUDIT-002). Secret values SHALL be redacted per SR-REDACT-001. Unrestricted full-row snapshots and raw secrets SHALL NOT be stored. |
 | **OWNER** | Backend |
 | **THREAT / SOURCE** | TM-AUDIT-001 |
-| **VERIFICATION** | Golden-path execute + failed authz + rollback each produce required audit rows with correlation IDs. |
+| **VERIFICATION** | For each catalog row marked REQUIRED: an automated test triggers the WHEN condition and asserts (a) exactly one matching event type is recorded, (b) every REQUIRED FIELD is present and non-empty (except fields marked N/A for that type), (c) BEFORE/AFTER matches the catalog rule, (d) no secret substrings from SR-REDACT-001 appear in the event body. Golden path MUST cover at least: `mutation_succeeded`, `mutation_rejected` (authz deny), `preview_completed`, `confirmation_completed`, `rollback_succeeded`, `agent_enrolled`, `agent_revoked`. |
+
+##### V1 Audit Event Catalog (normative for SR-AUDIT-001)
+
+Common fields (include when applicable; omit only when N/A for the event):
+
+| Field | Notes |
+| --- | --- |
+| `event_type` | Exact catalog name |
+| `timestamp` | Server event time (UTC) |
+| `actor_id` | Authenticated actor; system/Agent identity when no user |
+| `organization_id` | Tenant org |
+| `environment_id` | When environment-scoped |
+| `operation_id` | When an Operation exists |
+| `action_or_config_id` | ActionDefinition / ApprovedFieldEditConfig identity + pin/version when known |
+| `target_summary` | Non-secret identifier summary (table/collection + key fields as allowed) |
+| `status` / `result` | Outcome enum for the event |
+| `rollback_of_operation_id` | Required on rollback events; links to original Operation |
+
+**Before/after principle:** store only redacted, representable mutated field values. Do **not** store secrets or unrestricted full-row dumps.
+
+| Event type | WHEN REQUIRED | REQUIRED FIELDS (in addition to `event_type`, `timestamp`) | BEFORE/AFTER |
+| --- | --- | --- | --- |
+| `mutation_requested` | Cloud accepts a mutate intent / begins mutate authorization path for an Operation | `actor_id`, `organization_id`, `environment_id`, `operation_id`, `action_or_config_id`, `target_summary`, `status` | **N/A** |
+| `mutation_rejected` | Mutate path denied (authz, env mismatch, confirmation missing/invalid, definition pin mismatch, envelope invalid, or other fail-closed reject before customer-data mutation) | `actor_id`, `organization_id`, `environment_id` (if known), `operation_id` (if known), `action_or_config_id` (if known), `target_summary` (if known), `status` (include reject reason class, not secrets) | **N/A** |
+| `preview_completed` | Preview completes (success or failed preview attempt that was authorized to run) for an Operation that can gate mutation | `actor_id`, `organization_id`, `environment_id`, `operation_id`, `action_or_config_id`, `target_summary`, `status`; MAY reference a preview fingerprint / limitation flags | **N/A** for mutation before/after; MAY include non-mutating preview summary reference only |
+| `confirmation_completed` | Confirmation record successfully created for an Operation | `actor_id`, `organization_id`, `environment_id`, `operation_id`, `action_or_config_id`, `status` | **N/A** |
+| `mutation_succeeded` | Agent/Cloud records successful customer-data mutation for an Operation | `actor_id`, `organization_id`, `environment_id`, `operation_id`, `action_or_config_id`, `target_summary`, `status` | **REQUIRED** for mutated fields that are representable after redaction; if a mutated field cannot be represented without violating SR-REDACT-001, record field name + `redacted` marker and omit raw value |
+| `mutation_failed` | Mutation attempted and definitively failed without applying the intended customer-data change (or applied none) | same as `mutation_succeeded` field set | **OPTIONAL**; include before image if captured pre-attempt; after SHOULD reflect unchanged or partial-apply state if representable |
+| `mutation_unknown` | Outcome is indeterminate after dispatch (timeout/crash/reconnect); Operation remains `unknown` pending reconciliation | `actor_id`, `organization_id`, `environment_id`, `operation_id`, `action_or_config_id`, `target_summary`, `status=unknown` | **N/A** until reconciliation; a later terminal event (`mutation_succeeded` / `mutation_failed`) SHALL be appended when outcome is established |
+| `rollback_requested` | Rollback Operation is requested / authorized to start | `actor_id`, `organization_id`, `environment_id`, `operation_id` (rollback op), `rollback_of_operation_id`, `action_or_config_id` (if applicable), `target_summary`, `status` | **N/A** |
+| `rollback_succeeded` | Rollback mutation succeeds | same as `rollback_requested` + terminal `status` | **REQUIRED** for reverted fields that are representable after redaction (same redaction rule as `mutation_succeeded`) |
+| `rollback_failed` | Rollback attempted and definitively fails, or is rejected because safe rollback cannot be proven | same as `rollback_requested` + terminal `status` / reject reason class | **OPTIONAL**; include before image if captured |
+| `agent_enrolled` | Agent enrollment completes successfully | `actor_id` (enrolling admin), `organization_id`, `environment_id`, Agent id in `target_summary` or dedicated `agent_id` field, `status` | **N/A** |
+| `agent_revoked` | Agent revocation completes | `actor_id`, `organization_id`, `environment_id`, Agent id, `status` | **N/A** |
+
+Events in this catalog are the **minimum** V1 set. Implementations MAY emit additional event types but SHALL NOT omit REQUIRED emissions above.
 
 #### SR-AUDIT-002
 | | |
@@ -274,10 +310,10 @@ Mitigation provenance uses Issue #4 states:
 #### SR-SECRETS-001
 | | |
 | --- | --- |
-| **REQUIREMENT** | TinyAdmin Cloud SHALL NEVER store customer database credentials. Credentials SHALL remain in customer infrastructure and be usable only by the TinyAdmin Agent / local secret mechanism referenced by `customer_secret_ref`. Customer databases SHALL NOT require public `5432`/`27017` exposure for TinyAdmin. |
+| **REQUIREMENT** | TinyAdmin Cloud SHALL NEVER store customer database credentials. Credentials SHALL remain in customer infrastructure and be usable only by the TinyAdmin Agent / local secret mechanism referenced by `customer_secret_ref`. Customer databases SHALL NOT require public `5432`/`27017` (or equivalent Mongo) exposure for TinyAdmin; connectivity remains outbound-Agent / customer-side (established architecture). |
 | **OWNER** | Backend + Agent + Platform |
 | **THREAT / SOURCE** | Established property #1–#3; TM-DB-001 |
-| **VERIFICATION** | Architecture/schema conformance tests; Agent connects via customer-side secrets; Cloud API refuses credential upload fields. |
+| **VERIFICATION** | **Product / automated (Cloud):** (1) Cloud API and schema reject or refuse persistence of raw DB username/password/DSN fields; only non-secret `customer_secret_ref` (or equivalent opaque reference) is accepted and persisted. (2) Fixture/tests assert no credential columns on Connection and no raw credentials in Cloud DB. **Architecture / Platform / Agent evidence (not sole Cloud app tests):** (3) Documented connectivity path shows Agent initiates outbound encrypted connection and customer DB need not expose public `5432`/`27017` to TinyAdmin Cloud; evidence = architecture conformance note + Agent connectivity test or runbook demonstration. Outbound-only architecture is not weakened. |
 
 ---
 
@@ -286,10 +322,24 @@ Mitigation provenance uses Issue #4 states:
 #### SR-CONN-001
 | | |
 | --- | --- |
-| **REQUIREMENT** | V1 MAY allow one Agent to manage multiple Connections within its bound organization and environment. Implementations and customer guidance SHALL realize compensating controls CC-1..CC-7: (1) dedicated least-privilege DB users per Connection; (2) explicit Connection configuration only; (3) per-Connection secret isolation where practical; (4) Agent-side Connection allowlist matching Cloud Connection IDs; (5) immutable org/environment Agent binding; (6) command→Connection binding in signed envelopes with Agent mismatch reject; (7) documentation advising separate Agents when stronger isolation is required. One-Agent-per-database is NOT mandated. |
+| **REQUIREMENT** | V1 MAY allow one Agent to manage multiple Connections within its bound organization and environment. One-Agent-per-database is **NOT** mandated. FA-CONN-BLAST residual **HIGH** (Agent-host compromise can reach all Connections on that Agent) remains acknowledged. Compensating controls **CC-1..CC-7** SHALL be realized as specified in the verification matrix below (product-enforced vs customer/ops). |
 | **OWNER** | Agent + Backend + Platform |
 | **THREAT / SOURCE** | FA-CONN-BLAST; CC-1..CC-7 |
-| **VERIFICATION** | Agent refuses Connection IDs outside allowlist; envelope connection mismatch rejected; runbook/docs include least-privilege + stronger-isolation guidance; no product requirement forces single-Connection Agents. |
+| **VERIFICATION** | Every CC row below MUST have objective evidence before Connection multi-binding ships. Product rows require automated CI/integration/API/Agent tests. Ops/Docs rows require the named checklist artifact present and reviewed (no enterprise certification process). |
+
+##### CC-1..CC-7 verification matrix (normative for SR-CONN-001)
+
+| CC | Control | Enforcement | Objective verification method | Expected evidence |
+| --- | --- | --- | --- | --- |
+| **CC-1** | Dedicated least-privilege customer DB user per Connection | **Ops/Docs** (customer responsibility; product MAY document only) | Manual checklist: Connection runbook states dedicated DB user + least-privilege grant guidance; sample grant snippet or link present | `docs/` Connection hardening guidance merged; checklist item `CC-1-least-privilege-user` signed off on Connection feature PR |
+| **CC-2** | Explicit Connection configuration only (no implicit/undeclared Connection use) | **Product** | Integration test: mutation/preview targeting a Connection id that is not an explicitly configured Cloud Connection for that org/env is denied; Agent has no path to open an ad-hoc Connection from browser-supplied endpoints | Failing-closed API/Agent tests in CI |
+| **CC-3** | Per-Connection local secret isolation where practical | **Ops/Docs** (+ Product accepts only opaque refs) | Manual checklist: guidance recommends distinct secret refs / files / OS secret entries per Connection when practical; Product test: Cloud stores only opaque `customer_secret_ref`, never raw secrets | Hardening doc checklist item `CC-3-secret-isolation`; Cloud schema/API tests for refs-only |
+| **CC-4** | Agent Connection allowlist matching Cloud Connection IDs | **Product** | Agent integration test: command or local config referencing Connection id **outside** allowlist is rejected; allowlist update required before success | CI Agent test log + assertion |
+| **CC-5** | Agent immutable org/environment binding | **Product** | API/DB test: post-activation rebind of Agent org/env rejected; command with mismatched org/env rejected by Cloud and Agent | CI tests (aligns with SR-AGENT-003 / SR-ENV-001) |
+| **CC-6** | Command→Connection binding in signed envelopes; mismatch reject | **Product** | Tamper test: valid envelope rewritten with different `connection_id` fails Agent verify; Cloud mint binds server-resolved Connection only | CI Cloud+Agent tests (aligns with SR-CMD-001) |
+| **CC-7** | Guidance for customers needing stronger isolation (separate Agent / host) | **Ops/Docs** | Manual checklist: docs explicitly advise separate Agent (and preferably separate host) when reduced blast radius is required; states one-Agent-many-Connections remains supported default | Docs section present; checklist item `CC-7-stronger-isolation-guidance` signed off |
+
+**Topology regression check (Product):** automated or review assertion that the product does **not** require exactly one Connection per Agent to function.
 
 ---
 
@@ -395,3 +445,4 @@ Compensating controls CC-1..CC-7 are formalized as **SR-CONN-001**.
 | Date | Change |
 | --- | --- |
 | 2026-09-23 | Production-MVP Issue #5 security requirements (25 SHALLs) from merged Issue #4 handoff |
+| 2026-09-23 | QA testability remediation (PR #16): SR-CONN-001 CC matrix; SR-AUDIT-001 V1 event catalog; SR-AUTHZ-002 revoke determinism; SR-SECRETS-001 split product vs architecture evidence; SR-ENV-002 Issue #7 manual evidence pointer |
