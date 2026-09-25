@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -105,6 +106,36 @@ func run(configPath string, logger *slog.Logger) error {
 	cloudClient.SetCancelRevokeHandler(func(cancelledOps []string) error {
 		return opMgr.ProcessCancelRevoke(cancelledOps)
 	})
+
+	logger.Info("performing crash recovery scan")
+	indeterminateOps, err := store.GetIndeterminateOperations()
+	if err != nil {
+		return fmt.Errorf("failed to scan indeterminate operations: %w", err)
+	}
+
+	if len(indeterminateOps) > 0 {
+		logger.Warn("found indeterminate operations from previous crash", "count", len(indeterminateOps))
+		for _, op := range indeterminateOps {
+			logger.Info("marking operation as unknown", "operation_id", op.OperationID, "state", op.State)
+			
+			unknownResult := &protocol.ResultMessage{
+				MessageType:     protocol.MessageTypeResult,
+				OperationID:     op.OperationID,
+				Status:          "unknown",
+				ErrorMessage:    "operation outcome indeterminate after agent restart",
+				ProtocolVersion: protocol.ProtocolVersion,
+			}
+			
+			unknownResultData, _ := json.Marshal(unknownResult)
+			if err := store.UpdateOperationState(op.OperationID, storage.StateUnknown, unknownResultData); err != nil {
+				logger.Error("failed to mark operation as unknown", "operation_id", op.OperationID, "error", err)
+			}
+			
+			if err := store.RecordUnackedResult(op.OperationID, unknownResultData); err != nil {
+				logger.Error("failed to record unknown result for crash recovery", "operation_id", op.OperationID, "error", err)
+			}
+		}
+	}
 
 	logger.Info("starting cloud connection")
 

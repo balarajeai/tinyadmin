@@ -20,6 +20,16 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open storage: %w", err)
 	}
 
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set busy_timeout: %w", err)
+	}
+
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to ping storage: %w", err)
@@ -248,4 +258,48 @@ func (s *Store) IsCancelled(operationID string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (s *Store) GetIndeterminateOperations() ([]*Operation, error) {
+	query := `
+		SELECT operation_id, state, command_data, result_data, created_at, updated_at
+		FROM operations
+		WHERE state IN (?, ?)
+		ORDER BY created_at ASC
+	`
+
+	rows, err := s.db.Query(query, StateExecuting, StateExecutionIntentPersisted)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query indeterminate operations: %w", err)
+	}
+	defer rows.Close()
+
+	var ops []*Operation
+	for rows.Next() {
+		var op Operation
+		var commandData, resultData sql.NullString
+		var createdAt, updatedAt int64
+
+		if err := rows.Scan(&op.OperationID, &op.State, &commandData, &resultData, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan operation: %w", err)
+		}
+
+		if commandData.Valid {
+			op.CommandData = json.RawMessage(commandData.String)
+		}
+		if resultData.Valid {
+			op.ResultData = json.RawMessage(resultData.String)
+		}
+
+		op.CreatedAt = time.Unix(createdAt, 0)
+		op.UpdatedAt = time.Unix(updatedAt, 0)
+
+		ops = append(ops, &op)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating indeterminate operations: %w", err)
+	}
+
+	return ops, nil
 }
