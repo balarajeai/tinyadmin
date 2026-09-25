@@ -187,25 +187,53 @@ func ValidateMutatingCommand(cmd *Command, expectedActionID string) error {
 		return fmt.Errorf("payload digest verification failed: %w", err)
 	}
 
-	actionOp, ok := payload.ActionOrFieldOp.(map[string]any)
+	// Validate envelope action_or_field_op
+	envActionOp, ok := cmd.Authorization.ActionOrFieldOp.(map[string]any)
 	if !ok {
-		return errors.New("action_or_field_op must be an object")
+		return errors.New("envelope action_or_field_op must be an object")
 	}
 
-	actionType, ok := actionOp["type"].(string)
-	if !ok || actionType != "action" {
-		return fmt.Errorf("action_or_field_op.type must be 'action', got %v", actionType)
+	envActionType, ok := envActionOp["type"].(string)
+	if !ok || envActionType != "action" {
+		return fmt.Errorf("envelope action_or_field_op.type must be 'action', got %v", envActionType)
 	}
 
-	actionDefID, ok := actionOp["action_definition_id"].(string)
+	envActionDefID, ok := envActionOp["action_definition_id"].(string)
 	if !ok {
-		return errors.New("action_definition_id is required for action type")
+		return errors.New("envelope action_definition_id is required for action type")
 	}
 
-	if expectedActionID != "" && actionDefID != expectedActionID {
-		return fmt.Errorf("action_definition_id mismatch: expected %s, got %s", expectedActionID, actionDefID)
+	// Validate payload action_or_field_op
+	payloadActionOp, ok := payload.ActionOrFieldOp.(map[string]any)
+	if !ok {
+		return errors.New("payload action_or_field_op must be an object")
 	}
 
+	payloadActionType, ok := payloadActionOp["type"].(string)
+	if !ok || payloadActionType != "action" {
+		return fmt.Errorf("payload action_or_field_op.type must be 'action', got %v", payloadActionType)
+	}
+
+	payloadActionDefID, ok := payloadActionOp["action_definition_id"].(string)
+	if !ok {
+		return errors.New("payload action_definition_id is required for action type")
+	}
+
+	// Envelope and payload action fields must match
+	if envActionType != payloadActionType {
+		return fmt.Errorf("action type mismatch: envelope=%s, payload=%s", envActionType, payloadActionType)
+	}
+
+	if envActionDefID != payloadActionDefID {
+		return fmt.Errorf("action_definition_id mismatch: envelope=%s, payload=%s", envActionDefID, payloadActionDefID)
+	}
+
+	// Validate against expected action ID if provided
+	if expectedActionID != "" && envActionDefID != expectedActionID {
+		return fmt.Errorf("action_definition_id mismatch: expected %s, got %s", expectedActionID, envActionDefID)
+	}
+
+	// Envelope max_affected_records is the authorization bound
 	if payload.MaxAffectedRecords != cmd.Authorization.MaxAffectedRecords {
 		return fmt.Errorf("max_affected_records mismatch: envelope=%d, payload=%d", 
 			cmd.Authorization.MaxAffectedRecords, payload.MaxAffectedRecords)

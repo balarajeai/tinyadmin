@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -329,5 +330,193 @@ func TestCloudClient_WakeSignalNonBlocking(t *testing.T) {
 	case <-client.resultWake:
 		t.Error("wake channel should not have multiple buffered signals")
 	default:
+	}
+}
+
+func TestCloudClient_UnauthenticatedAckCannotClear(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStore(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	result := &protocol.ResultMessage{
+		MessageType:     protocol.MessageTypeResult,
+		OperationID:     "op-1",
+		Status:          "succeeded",
+		ProtocolVersion: 1,
+	}
+
+	resultData, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+
+	if err := store.RecordUnackedResult("op-1", resultData); err != nil {
+		t.Fatalf("failed to record unacked result: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	client := &Client{
+		store:  store,
+		logger: logger,
+	}
+	
+	// Session NOT authenticated
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = false
+	client.sessionAuthMu.Unlock()
+
+	ackMsg := map[string]any{
+		"operation_id": "op-1",
+		"acknowledged": true,
+	}
+	ackBytes, err := json.Marshal(ackMsg)
+	if err != nil {
+		t.Fatalf("failed to marshal ack: %v", err)
+	}
+
+	if err := client.handleResultAck(ackBytes); err != nil {
+		t.Fatalf("handleResultAck should not error on unauthenticated ack: %v", err)
+	}
+
+	unacked, err := store.GetUnackedResults()
+	if err != nil {
+		t.Fatalf("failed to get unacked results: %v", err)
+	}
+	if len(unacked) != 1 {
+		t.Errorf("expected 1 unacked result still present (unauthenticated ack should not clear), got %d", len(unacked))
+	}
+}
+
+func TestCloudClient_WrongOperationAckCannotClearAnother(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStore(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	result1 := &protocol.ResultMessage{
+		MessageType:     protocol.MessageTypeResult,
+		OperationID:     "op-1",
+		Status:          "succeeded",
+		ProtocolVersion: 1,
+	}
+	resultData1, _ := json.Marshal(result1)
+	store.RecordUnackedResult("op-1", resultData1)
+
+	result2 := &protocol.ResultMessage{
+		MessageType:     protocol.MessageTypeResult,
+		OperationID:     "op-2",
+		Status:          "succeeded",
+		ProtocolVersion: 1,
+	}
+	resultData2, _ := json.Marshal(result2)
+	store.RecordUnackedResult("op-2", resultData2)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	client := &Client{
+		store:  store,
+		logger: logger,
+	}
+	
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = true
+	client.sessionAuthMu.Unlock()
+
+	ackMsg := map[string]any{
+		"operation_id": "op-1",
+		"acknowledged": true,
+	}
+	ackBytes, err := json.Marshal(ackMsg)
+	if err != nil {
+		t.Fatalf("failed to marshal ack: %v", err)
+	}
+
+	if err := client.handleResultAck(ackBytes); err != nil {
+		t.Fatalf("handleResultAck failed: %v", err)
+	}
+
+	unacked, err := store.GetUnackedResults()
+	if err != nil {
+		t.Fatalf("failed to get unacked results: %v", err)
+	}
+	if len(unacked) != 1 {
+		t.Fatalf("expected 1 unacked result remaining (op-2), got %d", len(unacked))
+	}
+	
+	if unacked[0].OperationID != "op-2" {
+		t.Errorf("expected remaining result to be op-2, got %s", unacked[0].OperationID)
+	}
+}
+
+func TestCloudClient_CommandRejectedBeforeSessionAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStore(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	client := &Client{
+		store:  store,
+		logger: logger,
+	}
+	
+	// Session NOT authenticated
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = false
+	client.sessionAuthMu.Unlock()
+
+	cmdMsg := map[string]any{
+		"message_type":   "command",
+		"command_type":   "execute",
+		"protocol_version": 1,
+		"authorization": map[string]any{
+			"operation_id": "op-cmd-1",
+		},
+	}
+	cmdBytes, _ := json.Marshal(cmdMsg)
+
+	ctx := context.Background()
+	err = client.handleCommandMessage(ctx, cmdBytes)
+	if err == nil {
+		t.Error("expected error for command before session authentication")
+	}
+	if err != nil && err.Error() != "session not authenticated, rejecting command" {
+		t.Errorf("expected session not authenticated error, got: %v", err)
+	}
+}
+
+func TestCloudClient_CancelRevokeRequiresConnection(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStore(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	client := NewClient(
+		"ws://localhost:9999",
+		"agent-1",
+		testPrivateKey(t),
+		1*time.Second,
+		10*time.Second,
+		30*time.Second,
+		store,
+		logger,
+	)
+
+	err = client.syncCancelRevoke()
+	if err == nil {
+		t.Error("expected error for cancel/revoke sync without connection")
 	}
 }

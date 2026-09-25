@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -456,5 +457,94 @@ func TestOperationManager_IndeterminateDuplicateRejected(t *testing.T) {
 
 	if result.Status != "failed" {
 		t.Errorf("expected status 'failed' for duplicate indeterminate operation, got %s", result.Status)
+	}
+}
+
+func TestOperationManager_UnsupportedCommandPersistsFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := storage.NewStore(tmpDir + "/test.db")
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	connMgr := connection.NewManager(make(map[string]string))
+	
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	mgr := NewManager(
+		store,
+		connMgr,
+		"agent-1",
+		"org-1",
+		"env-1",
+		pub,
+		5*time.Minute,
+		logger,
+	)
+
+	now := time.Now()
+	env := &protocol.AuthorizationEnvelope{
+		Kid:            "key-1",
+		OperationID:    "op-unsupported",
+		ActorID:        "actor-1",
+		OrganizationID: "org-1",
+		EnvironmentID:  "env-1",
+		AgentID:        "agent-1",
+		ConnectionID:   "conn-1",
+		ActionOrFieldOp: map[string]string{
+			"type": "action",
+		},
+		MaxAffectedRecords: 1,
+		IssuedAt:           now.Add(-1 * time.Minute),
+		ExpiresAt:          now.Add(5 * time.Minute),
+	}
+
+	canonical, _ := protocol.CanonicalizeJSON(env)
+	signature := ed25519.Sign(priv, canonical)
+	env.Signature = base64.RawURLEncoding.EncodeToString(signature)
+
+	cmd := &protocol.Command{
+		MessageType:     protocol.MessageTypeCommand,
+		CommandType:     "rollback",
+		Authorization:   env,
+		ProtocolVersion: 1,
+	}
+
+	ctx := context.Background()
+	result, err := mgr.HandleCommand(ctx, cmd)
+	if err != nil {
+		t.Fatalf("HandleCommand failed: %v", err)
+	}
+
+	if result.Status != "failed" {
+		t.Errorf("expected status 'failed' for unsupported command, got %s", result.Status)
+	}
+
+	if result.ErrorMessage == "" {
+		t.Error("expected error message for unsupported command")
+	}
+
+	op, err := store.GetOperation("op-unsupported")
+	if err != nil {
+		t.Fatalf("failed to get operation: %v", err)
+	}
+
+	if op.State != storage.StateFailed {
+		t.Errorf("expected operation state 'failed', got %s", op.State)
+	}
+
+	unacked, err := store.GetUnackedResults()
+	if err != nil {
+		t.Fatalf("failed to get unacked results: %v", err)
+	}
+
+	if len(unacked) != 1 {
+		t.Errorf("expected 1 unacked result, got %d", len(unacked))
 	}
 }

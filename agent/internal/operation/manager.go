@@ -133,7 +133,14 @@ func (m *Manager) HandleCommand(ctx context.Context, cmd *protocol.Command) (*pr
 	case protocol.CommandTypeExecute:
 		return m.handleExecute(ctx, env, cmd.Payload, dsn)
 	default:
-		return m.buildErrorResult(env.OperationID, fmt.Sprintf("unsupported command type: %s", cmd.CommandType)), nil
+		m.logger.Error("unsupported command type", "operation_id", env.OperationID, "command_type", cmd.CommandType)
+		
+		result := m.buildErrorResult(env.OperationID, fmt.Sprintf("unsupported command type: %s", cmd.CommandType))
+		if err := m.recordResult(env.OperationID, storage.StateFailed, result); err != nil {
+			return nil, fmt.Errorf("failed to record unsupported command failure: %w", err)
+		}
+		
+		return result, nil
 	}
 }
 
@@ -185,7 +192,7 @@ func (m *Manager) handleExecute(ctx context.Context, env *protocol.Authorization
 		Payload:       payload,
 	}
 	
-	if err := protocol.ValidateMutatingCommand(cmd, ""); err != nil {
+	if err := protocol.ValidateMutatingCommand(cmd, action.UnlockUserActionID); err != nil {
 		m.logger.Error("mutating command validation failed", "operation_id", env.OperationID, "error", err)
 		
 		result := m.buildErrorResult(env.OperationID, fmt.Sprintf("command validation failed: %v", err))

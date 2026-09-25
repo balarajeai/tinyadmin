@@ -140,6 +140,10 @@ func TestValidateMutatingCommand_Success(t *testing.T) {
 	cmd := &Command{
 		CommandType: CommandTypeExecute,
 		Authorization: &AuthorizationEnvelope{
+			ActionOrFieldOp: map[string]any{
+				"type":                 "action",
+				"action_definition_id": "unlock-user",
+			},
 			MutationPayloadSHA256: digest,
 			MaxAffectedRecords:    1,
 		},
@@ -149,6 +153,74 @@ func TestValidateMutatingCommand_Success(t *testing.T) {
 	err := ValidateMutatingCommand(cmd, "unlock-user")
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateMutatingCommand_WrongActionID(t *testing.T) {
+	payload := &MutationPayload{
+		ActionOrFieldOp: map[string]any{
+			"type":                 "action",
+			"action_definition_id": "delete-user",
+		},
+		Targets:            map[string]any{"userId": "123"},
+		Parameters:         map[string]any{},
+		MaxAffectedRecords: 1,
+	}
+	
+	payloadBytes, _ := json.Marshal(payload)
+	canonical, _ := CanonicalizeJSON(payload)
+	digest := ComputeDigestBytes(canonical)
+	
+	cmd := &Command{
+		CommandType: CommandTypeExecute,
+		Authorization: &AuthorizationEnvelope{
+			ActionOrFieldOp: map[string]any{
+				"type":                 "action",
+				"action_definition_id": "delete-user",
+			},
+			MutationPayloadSHA256: digest,
+			MaxAffectedRecords:    1,
+		},
+		Payload: payloadBytes,
+	}
+	
+	err := ValidateMutatingCommand(cmd, "unlock-user")
+	if err == nil {
+		t.Error("expected error for wrong action_definition_id")
+	}
+}
+
+func TestValidateMutatingCommand_EnvelopePayloadActionMismatch(t *testing.T) {
+	payload := &MutationPayload{
+		ActionOrFieldOp: map[string]any{
+			"type":                 "action",
+			"action_definition_id": "unlock-user",
+		},
+		Targets:            map[string]any{"userId": "123"},
+		Parameters:         map[string]any{},
+		MaxAffectedRecords: 1,
+	}
+	
+	payloadBytes, _ := json.Marshal(payload)
+	canonical, _ := CanonicalizeJSON(payload)
+	digest := ComputeDigestBytes(canonical)
+	
+	cmd := &Command{
+		CommandType: CommandTypeExecute,
+		Authorization: &AuthorizationEnvelope{
+			ActionOrFieldOp: map[string]any{
+				"type":                 "action",
+				"action_definition_id": "delete-user",
+			},
+			MutationPayloadSHA256: digest,
+			MaxAffectedRecords:    1,
+		},
+		Payload: payloadBytes,
+	}
+	
+	err := ValidateMutatingCommand(cmd, "")
+	if err == nil {
+		t.Error("expected error for envelope/payload action_definition_id mismatch")
 	}
 }
 
