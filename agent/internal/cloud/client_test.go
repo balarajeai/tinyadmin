@@ -1,6 +1,8 @@
 package cloud
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -14,6 +16,14 @@ import (
 	"github.com/balarajeai/tinyadmin/agent/internal/protocol"
 	"github.com/balarajeai/tinyadmin/agent/internal/storage"
 )
+
+func testPrivateKey(t *testing.T) ed25519.PrivateKey {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate test key: %v", err)
+	}
+	return priv
+}
 
 func TestCloudClient_ResultAckClearsDurableState(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -53,6 +63,10 @@ func TestCloudClient_ResultAckClearsDurableState(t *testing.T) {
 		store:  store,
 		logger: logger,
 	}
+	
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = true
+	client.sessionAuthMu.Unlock()
 
 	ackMsg := map[string]any{
 		"operation_id": "op-1",
@@ -106,6 +120,10 @@ func TestCloudClient_DuplicateAckSafe(t *testing.T) {
 		store:  store,
 		logger: logger,
 	}
+	
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = true
+	client.sessionAuthMu.Unlock()
 
 	ackMsg := map[string]any{
 		"operation_id": "op-1",
@@ -163,6 +181,10 @@ func TestCloudClient_UnknownAckDoesNotCorruptState(t *testing.T) {
 		store:  store,
 		logger: logger,
 	}
+	
+	client.sessionAuthMu.Lock()
+	client.sessionAuth = true
+	client.sessionAuthMu.Unlock()
 
 	ackMsg := map[string]any{
 		"operation_id": "op-nonexistent",
@@ -238,6 +260,7 @@ func TestCloudClient_SendPendingResults(t *testing.T) {
 	client := NewClient(
 		"ws://"+server.Listener.Addr().String(),
 		"agent-1",
+		testPrivateKey(t),
 		1*time.Second,
 		10*time.Second,
 		30*time.Second,
@@ -284,6 +307,7 @@ func TestCloudClient_WakeSignalNonBlocking(t *testing.T) {
 	client := NewClient(
 		"ws://localhost:9999",
 		"agent-1",
+		testPrivateKey(t),
 		1*time.Second,
 		10*time.Second,
 		30*time.Second,

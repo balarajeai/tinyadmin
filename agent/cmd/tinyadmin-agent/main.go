@@ -85,6 +85,7 @@ func run(configPath string, logger *slog.Logger) error {
 	cloudClient := cloud.NewClient(
 		cfg.Cloud.Endpoint,
 		cfg.Agent.ID,
+		ident.PrivateKey(),
 		cfg.Cloud.ReconnectBaseDelay,
 		cfg.Cloud.ReconnectMaxDelay,
 		cfg.Cloud.HeartbeatInterval,

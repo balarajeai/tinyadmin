@@ -2,13 +2,15 @@ package cloud
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
-	"math/rand"
+	mathrand "math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -22,14 +24,18 @@ import (
 type Client struct {
 	endpoint           string
 	agentID            string
+	agentPrivateKey    ed25519.PrivateKey
 	reconnectBaseDelay time.Duration
 	reconnectMaxDelay  time.Duration
 	heartbeatInterval  time.Duration
 	logger             *slog.Logger
 	store              *storage.Store
 
-	conn        *websocket.Conn
-	connMu      sync.Mutex
+	conn            *websocket.Conn
+	connMu          sync.Mutex
+	writeMu         sync.Mutex
+	sessionAuth     bool
+	sessionAuthMu   sync.RWMutex
 	
 	commandHandler func(context.Context, *protocol.Command) (*protocol.ResultMessage, error)
 	cancelRevokeHandler func([]string) error
@@ -44,6 +50,7 @@ type Client struct {
 func NewClient(
 	endpoint string,
 	agentID string,
+	agentPrivateKey ed25519.PrivateKey,
 	reconnectBaseDelay, reconnectMaxDelay, heartbeatInterval time.Duration,
 	store *storage.Store,
 	logger *slog.Logger,
@@ -53,6 +60,7 @@ func NewClient(
 	return &Client{
 		endpoint:           endpoint,
 		agentID:            agentID,
+		agentPrivateKey:    agentPrivateKey,
 		reconnectBaseDelay: reconnectBaseDelay,
 		reconnectMaxDelay:  reconnectMaxDelay,
 		heartbeatInterval:  heartbeatInterval,
@@ -152,7 +160,7 @@ func (c *Client) calculateBackoff(attempt int) time.Duration {
 	multiplier := math.Pow(2, float64(attempt-1))
 	delay := time.Duration(float64(c.reconnectBaseDelay) * multiplier)
 	
-	jitter := time.Duration(rand.Float64() * float64(delay) * 0.1)
+	jitter := time.Duration(mathrand.Float64() * float64(delay) * 0.1)
 	delay += jitter
 	
 	if delay > c.reconnectMaxDelay {
@@ -187,9 +195,114 @@ func (c *Client) connect() error {
 	return nil
 }
 
+func (c *Client) authenticateSession() error {
+	hello := map[string]any{
+		"message_type":      "session_hello",
+		"agent_id":          c.agentID,
+		"protocol_version":  protocol.ProtocolVersion,
+	}
+	
+	if err := c.writeJSON(hello); err != nil {
+		return fmt.Errorf("failed to send session_hello: %w", err)
+	}
+	
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	
+	if conn == nil {
+		return errors.New("no connection")
+	}
+	
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+	
+	var challenge struct {
+		MessageType string `json:"message_type"`
+		Nonce       string `json:"nonce"`
+	}
+	
+	if err := conn.ReadJSON(&challenge); err != nil {
+		return fmt.Errorf("failed to read challenge: %w", err)
+	}
+	
+	if challenge.MessageType != "challenge" {
+		return fmt.Errorf("unexpected message type: %s", challenge.MessageType)
+	}
+	
+	nonceBytes, err := base64.RawURLEncoding.DecodeString(challenge.Nonce)
+	if err != nil {
+		return fmt.Errorf("failed to decode nonce: %w", err)
+	}
+	
+	signature := ed25519.Sign(c.agentPrivateKey, nonceBytes)
+	signatureB64 := base64.RawURLEncoding.EncodeToString(signature)
+	
+	response := map[string]any{
+		"message_type": "challenge_response",
+		"agent_id":     c.agentID,
+		"signature":    signatureB64,
+	}
+	
+	if err := c.writeJSON(response); err != nil {
+		return fmt.Errorf("failed to send challenge_response: %w", err)
+	}
+	
+	var sessionOk struct {
+		MessageType string `json:"message_type"`
+		SessionExp  int64  `json:"session_exp,omitempty"`
+		ServerTime  int64  `json:"server_time,omitempty"`
+	}
+	
+	if err := conn.ReadJSON(&sessionOk); err != nil {
+		return fmt.Errorf("failed to read session_ok: %w", err)
+	}
+	
+	if sessionOk.MessageType != "session_ok" {
+		return fmt.Errorf("session authentication failed: %s", sessionOk.MessageType)
+	}
+	
+	c.sessionAuthMu.Lock()
+	c.sessionAuth = true
+	c.sessionAuthMu.Unlock()
+	
+	c.logger.Info("session authenticated successfully")
+	
+	return nil
+}
+
+func (c *Client) isSessionAuthenticated() bool {
+	c.sessionAuthMu.RLock()
+	defer c.sessionAuthMu.RUnlock()
+	return c.sessionAuth
+}
+
+func (c *Client) writeJSON(v any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	
+	c.connMu.Lock()
+	conn := c.conn
+	c.connMu.Unlock()
+	
+	if conn == nil {
+		return errors.New("no connection")
+	}
+	
+	return conn.WriteJSON(v)
+}
+
 func (c *Client) handleConnection() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	
+	c.sessionAuthMu.Lock()
+	c.sessionAuth = false
+	c.sessionAuthMu.Unlock()
+	
+	if err := c.authenticateSession(); err != nil {
+		return fmt.Errorf("session authentication failed: %w", err)
+	}
 	
 	if err := c.syncCancelRevoke(); err != nil {
 		return fmt.Errorf("cancel/revoke sync failed: %w", err)
@@ -315,9 +428,18 @@ func (c *Client) receiveLoop(ctx context.Context) error {
 }
 
 func (c *Client) handleCommandMessage(ctx context.Context, msgBytes []byte) error {
+	if !c.isSessionAuthenticated() {
+		return errors.New("session not authenticated, rejecting command")
+	}
+	
 	var cmd protocol.Command
 	if err := json.Unmarshal(msgBytes, &cmd); err != nil {
 		return fmt.Errorf("failed to unmarshal command: %w", err)
+	}
+	
+	if cmd.Authorization == nil {
+		c.logger.Error("command missing authorization envelope")
+		return errors.New("command missing authorization envelope")
 	}
 	
 	c.logger.Info("received command", 
@@ -342,6 +464,11 @@ func (c *Client) handleCommandMessage(ctx context.Context, msgBytes []byte) erro
 }
 
 func (c *Client) handleResultAck(msgBytes []byte) error {
+	if !c.isSessionAuthenticated() {
+		c.logger.Warn("unauthenticated result_ack ignored")
+		return nil
+	}
+	
 	var ack protocol.ResultAck
 	if err := json.Unmarshal(msgBytes, &ack); err != nil {
 		return fmt.Errorf("failed to unmarshal result_ack: %w", err)
@@ -367,15 +494,7 @@ func (c *Client) sendPong() error {
 		"message_type": "pong",
 	}
 	
-	c.connMu.Lock()
-	conn := c.conn
-	c.connMu.Unlock()
-	
-	if conn == nil {
-		return errors.New("no connection")
-	}
-	
-	return conn.WriteJSON(msg)
+	return c.writeJSON(msg)
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context) error {
@@ -415,15 +534,7 @@ func (c *Client) sendHeartbeat() error {
 		"agent_id":     c.agentID,
 	}
 	
-	c.connMu.Lock()
-	conn := c.conn
-	c.connMu.Unlock()
-	
-	if conn == nil {
-		return errors.New("no connection")
-	}
-	
-	return conn.WriteJSON(msg)
+	return c.writeJSON(msg)
 }
 
 func (c *Client) sendPendingResults() error {
@@ -438,14 +549,6 @@ func (c *Client) sendPendingResults() error {
 	
 	c.logger.Info("sending pending results", "count", len(unacked))
 	
-	c.connMu.Lock()
-	conn := c.conn
-	c.connMu.Unlock()
-	
-	if conn == nil {
-		return errors.New("no connection")
-	}
-	
 	for _, ur := range unacked {
 		var result protocol.ResultMessage
 		if err := json.Unmarshal(ur.ResultData, &result); err != nil {
@@ -453,7 +556,7 @@ func (c *Client) sendPendingResults() error {
 			continue
 		}
 		
-		if err := conn.WriteJSON(result); err != nil {
+		if err := c.writeJSON(result); err != nil {
 			c.logger.Error("failed to send result", "error", err, "operation_id", result.OperationID)
 			return fmt.Errorf("failed to send result: %w", err)
 		}

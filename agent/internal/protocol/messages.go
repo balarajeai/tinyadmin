@@ -3,11 +3,14 @@ package protocol
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/gowebpki/jcs"
 )
 
 const ProtocolVersion = 1
@@ -85,14 +88,9 @@ func CanonicalizeJSON(data any) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal: %w", err)
 	}
 
-	var normalized any
-	if err := json.Unmarshal(b, &normalized); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal: %w", err)
-	}
-
-	canonical, err := json.Marshal(normalized)
+	canonical, err := jcs.Transform(b)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal canonical: %w", err)
+		return nil, fmt.Errorf("failed to canonicalize: %w", err)
 	}
 
 	return canonical, nil
@@ -113,7 +111,7 @@ func VerifyEnvelopeSignature(envelope *AuthorizationEnvelope, cloudPublicKey ed2
 		return errors.New("missing signature")
 	}
 
-	signature, err := hex.DecodeString(envelope.Signature)
+	signature, err := base64.RawURLEncoding.DecodeString(envelope.Signature)
 	if err != nil {
 		return fmt.Errorf("failed to decode signature: %w", err)
 	}
@@ -170,6 +168,51 @@ func ValidateEnvelope(envelope *AuthorizationEnvelope, agentOrgID, agentEnvID, a
 
 	if now.After(envelope.ExpiresAt.Add(clockSkewTolerance)) {
 		return fmt.Errorf("envelope expired (exp: %v, now: %v)", envelope.ExpiresAt, now)
+	}
+
+	return nil
+}
+
+func ValidateMutatingCommand(cmd *Command, expectedActionID string) error {
+	if cmd.Authorization.MutationPayloadSHA256 == "" {
+		return errors.New("mutation_payload_sha256 is required for mutating commands")
+	}
+
+	var payload MutationPayload
+	if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
+
+	if err := VerifyPayloadDigest(&payload, cmd.Authorization.MutationPayloadSHA256); err != nil {
+		return fmt.Errorf("payload digest verification failed: %w", err)
+	}
+
+	actionOp, ok := payload.ActionOrFieldOp.(map[string]any)
+	if !ok {
+		return errors.New("action_or_field_op must be an object")
+	}
+
+	actionType, ok := actionOp["type"].(string)
+	if !ok || actionType != "action" {
+		return fmt.Errorf("action_or_field_op.type must be 'action', got %v", actionType)
+	}
+
+	actionDefID, ok := actionOp["action_definition_id"].(string)
+	if !ok {
+		return errors.New("action_definition_id is required for action type")
+	}
+
+	if expectedActionID != "" && actionDefID != expectedActionID {
+		return fmt.Errorf("action_definition_id mismatch: expected %s, got %s", expectedActionID, actionDefID)
+	}
+
+	if payload.MaxAffectedRecords != cmd.Authorization.MaxAffectedRecords {
+		return fmt.Errorf("max_affected_records mismatch: envelope=%d, payload=%d", 
+			cmd.Authorization.MaxAffectedRecords, payload.MaxAffectedRecords)
+	}
+
+	if payload.MaxAffectedRecords <= 0 {
+		return fmt.Errorf("max_affected_records must be positive, got %d", payload.MaxAffectedRecords)
 	}
 
 	return nil

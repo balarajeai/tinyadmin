@@ -173,7 +173,7 @@ func (c *Client) PreviewUnlockUser(ctx context.Context, userID string) (*Preview
 	var id, email, status string
 	var locked bool
 
-	err = tx.QueryRowContext(ctx, query).Scan(&id, &email, &locked, &status)
+	err = tx.QueryRowContext(ctx, query, userID).Scan(&id, &email, &locked, &status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("user %s not found or not locked", userID)
@@ -220,7 +220,7 @@ func (c *Client) ExecuteUnlockUser(ctx context.Context, userID string, maxAffect
 	var id, email, status string
 	var locked bool
 
-	err = tx.QueryRowContext(ctx, queryBefore).Scan(&id, &email, &locked, &status)
+	err = tx.QueryRowContext(ctx, queryBefore, userID).Scan(&id, &email, &locked, &status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("user %s not found", userID)

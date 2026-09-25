@@ -3,7 +3,7 @@ package protocol
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -113,13 +113,16 @@ func TestVerifyEnvelopeSignature(t *testing.T) {
 	}
 
 	signature := ed25519.Sign(priv, canonical)
-	envelope.Signature = hex.EncodeToString(signature)
+	envelope.Signature = base64.RawURLEncoding.EncodeToString(signature)
 
 	if err := VerifyEnvelopeSignature(envelope, pub); err != nil {
 		t.Errorf("valid signature rejected: %v", err)
 	}
 
-	envelope.Signature = envelope.Signature[:len(envelope.Signature)-2] + "00"
+	tamperedSig := make([]byte, len(signature))
+	copy(tamperedSig, signature)
+	tamperedSig[len(tamperedSig)-1] ^= 0xFF
+	envelope.Signature = base64.RawURLEncoding.EncodeToString(tamperedSig)
 	if err := VerifyEnvelopeSignature(envelope, pub); err == nil {
 		t.Error("tampered signature accepted")
 	}
@@ -152,7 +155,7 @@ func TestValidateEnvelope(t *testing.T) {
 
 		canonical, _ := CanonicalizeJSON(env)
 		signature := ed25519.Sign(priv, canonical)
-		env.Signature = hex.EncodeToString(signature)
+		env.Signature = base64.RawURLEncoding.EncodeToString(signature)
 
 		return env
 	}

@@ -76,6 +76,10 @@ func (i *Identity) PublicKey() ed25519.PublicKey {
 	return i.publicKey
 }
 
+func (i *Identity) PrivateKey() ed25519.PrivateKey {
+	return i.privateKey
+}
+
 func (i *Identity) PublicKeyHex() string {
 	return hex.EncodeToString(i.publicKey)
 }

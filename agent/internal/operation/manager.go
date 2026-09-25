@@ -179,22 +179,26 @@ func (m *Manager) handlePreview(ctx context.Context, env *protocol.Authorization
 }
 
 func (m *Manager) handleExecute(ctx context.Context, env *protocol.AuthorizationEnvelope, payload json.RawMessage, dsn string) (*protocol.ResultMessage, error) {
+	cmd := &protocol.Command{
+		CommandType:   protocol.CommandTypeExecute,
+		Authorization: env,
+		Payload:       payload,
+	}
+	
+	if err := protocol.ValidateMutatingCommand(cmd, ""); err != nil {
+		m.logger.Error("mutating command validation failed", "operation_id", env.OperationID, "error", err)
+		
+		result := m.buildErrorResult(env.OperationID, fmt.Sprintf("command validation failed: %v", err))
+		if err := m.recordResult(env.OperationID, storage.StateFailed, result); err != nil {
+			return nil, fmt.Errorf("failed to record validation failure: %w", err)
+		}
+		
+		return result, nil
+	}
+	
 	var mutPayload protocol.MutationPayload
 	if err := json.Unmarshal(payload, &mutPayload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal mutation payload: %w", err)
-	}
-
-	if env.MutationPayloadSHA256 != "" {
-		if err := protocol.VerifyPayloadDigest(&mutPayload, env.MutationPayloadSHA256); err != nil {
-			m.logger.Error("payload digest mismatch", "operation_id", env.OperationID, "error", err)
-			
-			result := m.buildErrorResult(env.OperationID, fmt.Sprintf("payload digest mismatch: %v", err))
-			if err := m.recordResult(env.OperationID, storage.StateFailed, result); err != nil {
-				return nil, fmt.Errorf("failed to record digest mismatch: %w", err)
-			}
-			
-			return result, nil
-		}
 	}
 
 	if err := m.store.UpdateOperationState(env.OperationID, storage.StateExecutionIntentPersisted, nil); err != nil {
