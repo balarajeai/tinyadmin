@@ -1,0 +1,10 @@
+{
+  "message_type": "cancel_revoke_sync",
+  "protocol_version": 1,
+  "agent_revoked": false,
+  "canceled_operation_ids": [
+    "00000000-0000-0000-0000-000000000001",
+    "00000000-0000-0000-0000-000000000002"
+  ],
+  "authz_epoch": 1727280960000
+}
