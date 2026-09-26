@@ -1,11 +1,13 @@
 package com.tinyadmin.cloud;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest
+/**
+ * Smoke test to verify Spring application context loads successfully.
+ * Inherits @SpringBootTest from BaseIntegrationTest.
+ */
 class ApplicationStartupTest extends BaseIntegrationTest {
     
     @Test
