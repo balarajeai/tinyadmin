@@ -6,8 +6,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -22,6 +20,8 @@ import org.springframework.security.web.SecurityFilterChain;
  * 
  * V1 implementation: HTTP Basic Auth with custom AuthenticationProvider
  * Production: Replace with proper session management or JWT
+ * 
+ * NOTE: PasswordEncoder bean is in PasswordEncoderConfig to avoid circular dependency.
  */
 @Configuration
 @EnableWebSecurity
@@ -52,11 +52,6 @@ public class SecurityConfig {
             .authenticationProvider(operatorAuthenticationProvider);
         
         return http.build();
-    }
-    
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
     }
 }
 
