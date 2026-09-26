@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.security;
 
+import com.tinyadmin.cloud.BaseIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -25,10 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 
  * Tests validate operator authentication remediation is complete.
  */
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
-class OperatorAuthorizationNegativeTest {
+class OperatorAuthorizationNegativeTest extends BaseIntegrationTest {
     
     @Autowired
     private MockMvc mockMvc;

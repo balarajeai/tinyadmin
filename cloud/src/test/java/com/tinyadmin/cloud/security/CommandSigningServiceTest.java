@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.security.*;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -191,10 +193,18 @@ class CommandSigningServiceTest {
         assertNotNull(envelope.get("exp"));
         assertNotNull(envelope.get("signature"));
         
-        long iat = ((Number) envelope.get("iat")).longValue();
-        long exp = ((Number) envelope.get("exp")).longValue();
-        assertTrue(exp > iat, "Expiry should be after issued-at");
-        assertTrue(exp - iat <= 300, "TTL should be 5 minutes or less");
+        // Agent PR #24 / ADR 0007: iat/exp are RFC3339 ISO-8601 strings (not epoch numbers)
+        String iatString = (String) envelope.get("iat");
+        String expString = (String) envelope.get("exp");
+        assertNotNull(iatString, "iat must be present");
+        assertNotNull(expString, "exp must be present");
+        
+        Instant iat = Instant.parse(iatString);
+        Instant exp = Instant.parse(expString);
+        assertTrue(exp.isAfter(iat), "Expiry should be after issued-at");
+        
+        long ttlSeconds = Duration.between(iat, exp).getSeconds();
+        assertTrue(ttlSeconds <= 300, "TTL should be 5 minutes or less, was: " + ttlSeconds);
     }
     
     @Test

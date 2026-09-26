@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.operation;
 
+import com.tinyadmin.cloud.BaseIntegrationTest;
 import com.tinyadmin.cloud.CloudApplication;
 import com.tinyadmin.cloud.action.ActionDefinition;
 import com.tinyadmin.cloud.action.ActionDefinitionRepository;
@@ -38,10 +39,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for operation flow requiring authenticated operator context.
  * These tests are disabled pending authentication setup (Finding #1).
  */
-@SpringBootTest(classes = CloudApplication.class)
-@ActiveProfiles("test")
 @Transactional
-class OperationFlowTest {
+class OperationFlowTest extends BaseIntegrationTest {
     
     private static final UUID TEST_ORG_ID = UUID.fromString("00000000-0000-0000-0000-000000000099");
     private static final UUID TEST_ENV_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");

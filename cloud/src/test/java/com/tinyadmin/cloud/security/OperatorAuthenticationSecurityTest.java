@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.security;
 
+import com.tinyadmin.cloud.BaseIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -21,10 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - Client-supplied actor_id is ignored (server-assigned only)
  * - Cross-tenant access is prevented
  */
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
-class OperatorAuthenticationSecurityTest {
+class OperatorAuthenticationSecurityTest extends BaseIntegrationTest {
     
     @Autowired
     private MockMvc mockMvc;

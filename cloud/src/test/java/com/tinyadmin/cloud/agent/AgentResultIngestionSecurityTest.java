@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.agent;
 
+import com.tinyadmin.cloud.BaseIntegrationTest;
 import com.tinyadmin.cloud.CloudApplication;
 import com.tinyadmin.cloud.agent.protocol.AgentSession;
 import com.tinyadmin.cloud.agent.protocol.AgentSessionStore;
@@ -41,11 +42,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 
  * Tests validate SEC-PR23-002 remediation.
  */
-@SpringBootTest(classes = CloudApplication.class)
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
 @Transactional
-class AgentResultIngestionSecurityTest {
+class AgentResultIngestionSecurityTest extends BaseIntegrationTest {
     
     @Autowired
     private MockMvc mockMvc;
