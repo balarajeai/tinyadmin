@@ -3,8 +3,10 @@ package com.tinyadmin.cloud.audit;
 import com.tinyadmin.cloud.BaseIntegrationTest;
 import com.tinyadmin.cloud.environment.Environment;
 import com.tinyadmin.cloud.environment.EnvironmentKind;
+import com.tinyadmin.cloud.environment.EnvironmentRepository;
 import com.tinyadmin.cloud.environment.EnvironmentStatus;
 import com.tinyadmin.cloud.organization.Organization;
+import com.tinyadmin.cloud.organization.OrganizationRepository;
 import com.tinyadmin.cloud.organization.OrganizationStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,12 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Tests for audit event append-only semantics.
+ * 
+ * Persists Organization and Environment fixtures before recording audit events
+ * to satisfy Hibernate association requirements.
+ */
 @Transactional
 class AuditAppendOnlyTest extends BaseIntegrationTest {
     
@@ -24,13 +32,21 @@ class AuditAppendOnlyTest extends BaseIntegrationTest {
     @Autowired
     private AuditEventRepository auditEventRepository;
     
+    @Autowired
+    private OrganizationRepository organizationRepository;
+    
+    @Autowired
+    private EnvironmentRepository environmentRepository;
+    
     @Test
     void shouldRecordAuditEvent() {
+        // Persist organization and environment fixtures (required for Hibernate associations)
         Organization org = Organization.builder()
             .name("Test Org")
             .slug("test-" + UUID.randomUUID())
             .status(OrganizationStatus.ACTIVE)
             .build();
+        org = organizationRepository.save(org);
         
         Environment env = Environment.builder()
             .organization(org)
@@ -39,6 +55,7 @@ class AuditAppendOnlyTest extends BaseIntegrationTest {
             .kind(EnvironmentKind.PRODUCTION)
             .status(EnvironmentStatus.ACTIVE)
             .build();
+        env = environmentRepository.save(env);
         
         UUID operationId = UUID.randomUUID();
         
@@ -62,11 +79,13 @@ class AuditAppendOnlyTest extends BaseIntegrationTest {
     
     @Test
     void auditEventsShouldBeImmutableAfterCreation() {
+        // Persist organization fixture (required for Hibernate associations)
         Organization org = Organization.builder()
             .name("Test Org")
             .slug("test-" + UUID.randomUUID())
             .status(OrganizationStatus.ACTIVE)
             .build();
+        org = organizationRepository.save(org);
         
         AuditEvent event = auditService.recordEvent(AuditService.builder()
             .organization(org)

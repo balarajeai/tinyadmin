@@ -79,11 +79,12 @@ class AgentResultIngestionSecurityTest extends BaseIntegrationTest {
     @Test
     void testUnauthenticatedResultRejected() throws Exception {
         // SEC-PR23-002: Unauthenticated result ingestion MUST be rejected
+        // Agent PR #24 wire format: "result" field (not "body")
         String request = """
             {
                 "operationId": "00000000-0000-0000-0000-000000000001",
                 "status": "succeeded",
-                "body": {}
+                "result": {}
             }
             """;
         
@@ -98,11 +99,12 @@ class AgentResultIngestionSecurityTest extends BaseIntegrationTest {
     @Test
     void testInvalidSessionRejected() throws Exception {
         // SEC-PR23-002: Invalid/expired session MUST be rejected
+        // Agent PR #24 wire format: "result" field (not "body")
         String request = """
             {
                 "operationId": "00000000-0000-0000-0000-000000000001",
                 "status": "succeeded",
-                "body": {}
+                "result": {}
             }
             """;
         
