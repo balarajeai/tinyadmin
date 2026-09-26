@@ -251,6 +251,25 @@ public class CommandSigningService {
         return keyId;
     }
     
+    /**
+     * Signs arbitrary bytes with Cloud command-signing key (Finding #3).
+     * Used for result_ack and other authenticated Cloud responses.
+     * 
+     * @param canonicalBytes Canonical bytes to sign (e.g., JCS of ack payload)
+     * @return Ed25519 signature bytes
+     */
+    public byte[] signBytes(byte[] canonicalBytes) {
+        try {
+            Signature signature = Signature.getInstance("Ed25519", BouncyCastleProvider.PROVIDER_NAME);
+            signature.initSign(signingKey);
+            signature.update(canonicalBytes);
+            return signature.sign();
+        } catch (Exception e) {
+            log.error("Failed to sign bytes", e);
+            throw new RuntimeException("Failed to sign bytes", e);
+        }
+    }
+    
     private String bytesToHex(byte[] bytes) {
         StringBuilder result = new StringBuilder();
         for (byte b : bytes) {

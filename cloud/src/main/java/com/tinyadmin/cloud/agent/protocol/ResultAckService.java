@@ -87,30 +87,16 @@ public class ResultAckService {
     }
     
     /**
-     * Signs ack payload using Cloud command-signing key.
+     * Signs ack payload using Cloud command-signing key (Finding #3 - Real authenticated result_ack).
      * 
-     * V1 implementation note (SEC-PR12-005 / CR-PR12-004):
-     * Protocol allows "Cloud-signed or equivalently bound to the authenticated Cloud session."
+     * Uses Ed25519 signature over canonical ack payload.
+     * Agent verifies with Cloud command-signing public key.
      * 
-     * For V1 MVP:
-     * - WSS path: result_ack sent over authenticated session is implicitly authenticated
-     *   (session already proved via challenge-response; only Cloud can send on that session)
-     * - HTTPS fallback: must include Cloud-signed ack or authenticated response
-     * 
-     * This V1 implementation relies on authenticated session binding for WSS.
-     * HTTPS POST /agent/v1/results must add signature field here.
-     * 
-     * TODO Sprint 2: Refactor CommandSigningService to expose signBytes(byte[]) method
-     * for explicit Cloud signature on ack payload (works for both WSS and HTTPS paths).
+     * This provides explicit Cloud authenticity for both WSS and HTTPS paths.
      */
     private byte[] signAckPayload(byte[] canonicalBytes) {
-        // V1: Session-bound authenticity for WSS path
-        // For explicit signature, we need CommandSigningService.signBytes()
-        // which would use the same Ed25519 key as command envelope signing.
-        
-        // Placeholder: return empty signature; session binding provides auth for WSS
-        // Agent verifies that ack arrived on authenticated session
-        return new byte[64]; // Ed25519 signature size (zeroed for session-bound path)
+        // Use CommandSigningService.signBytes() for explicit Ed25519 signature
+        return commandSigningService.signBytes(canonicalBytes);
     }
     
     private String bytesToHex(byte[] bytes) {

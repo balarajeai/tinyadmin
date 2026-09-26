@@ -233,13 +233,16 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
     /**
      * Send authoritative cancel/revoke sync after authentication (CR-PR12-001).
      * Agent MUST apply this state before executing any pending mutations.
+     * 
+     * CRITICAL (Finding #4): FAILED != CANCELLED
+     * - FAILED: Mutation attempted and failed definitively
+     * - CANCELLED: Operation cancelled before execution (revoked/disabled/rejected)
      */
     private void sendCancelRevokeSync(WebSocketSession session, AgentSession agentSession) throws Exception {
-        // Query canceled operations for this Agent
-        // In V1 MVP, we query from operation lifecycle status
-        // Production: maintain explicit cancel tracking table
+        // Query CANCELLED operations (NOT FAILED) for this Agent
+        // Finding #4: FAILED != CANCELLED
         List<UUID> canceledOperationIds = operationRepository
-                .findByAgentIdAndLifecycleStatus(agentSession.getAgentId(), OperationLifecycleStatus.FAILED)
+                .findByAgentIdAndLifecycleStatus(agentSession.getAgentId(), OperationLifecycleStatus.CANCELLED)
                 .stream()
                 .map(Operation::getId)
                 .toList();
@@ -303,7 +306,7 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
             
             // Update operation status (idempotent - already succeeded/failed operations unchanged)
             OperationLifecycleStatus newStatus = mapResultStatus(status);
-            if (newStatus != null && operation.getLifecycleStatus() == OperationLifecycleStatus.PENDING) {
+            if (newStatus != null && operation.getLifecycleStatus() == OperationLifecycleStatus.PENDING_RESULT) {
                 operation.setLifecycleStatus(newStatus);
                 operation.setUpdatedAt(Instant.now());
                 operationRepository.save(operation);

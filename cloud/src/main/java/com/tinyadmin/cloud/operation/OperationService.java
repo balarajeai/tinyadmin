@@ -14,6 +14,7 @@ import com.tinyadmin.cloud.environment.EnvironmentRepository;
 import com.tinyadmin.cloud.organization.Organization;
 import com.tinyadmin.cloud.organization.OrganizationRepository;
 import com.tinyadmin.cloud.security.CommandSigningService;
+import com.tinyadmin.cloud.security.OperatorAuthenticationService;
 import com.tinyadmin.cloud.security.SignedCommand;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class OperationService {
     private final CommandSigningService commandSigningService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final OperatorAuthenticationService operatorAuthService;
     
     @Transactional
     public Operation createPreview(
@@ -50,9 +52,14 @@ public class OperationService {
         UUID agentId,
         UUID connectionId,
         UUID actionDefinitionId,
-        UUID actorUserId,
         Map<String, Object> target
     ) {
+        // CRITICAL: Get authoritative actor_id from authenticated session
+        // Client-supplied actor_id is FORBIDDEN
+        UUID actorUserId = operatorAuthService.getAuthenticatedActorId();
+        
+        // Validate operator has access to specified organization
+        operatorAuthService.requireOrganizationAccess(organizationId);
         Organization org = organizationRepository.findById(organizationId)
             .orElseThrow(() -> new IllegalArgumentException("Organization not found"));
         Environment env = environmentRepository.findById(environmentId)
@@ -88,7 +95,7 @@ public class OperationService {
             .kind(OperationKind.PREVIEW)
             .actionDefinition(action)
             .target(serializeToJson(target))
-            .lifecycleStatus(OperationLifecycleStatus.PENDING)
+            .lifecycleStatus(OperationLifecycleStatus.PREVIEW_PENDING)
             .build();
         
         operation = operationRepository.save(operation);
@@ -109,7 +116,8 @@ public class OperationService {
         preview = previewRepository.save(preview);
         
         operation.setPreviewId(preview.getId());
-        operation.setLifecycleStatus(OperationLifecycleStatus.SUCCEEDED);
+        // CRITICAL: Preview success is NOT mutation terminal success (Finding #7)
+        operation.setLifecycleStatus(OperationLifecycleStatus.PREVIEWED);
         operation = operationRepository.save(operation);
         
         auditService.recordEvent(AuditService.builder()
@@ -133,10 +141,14 @@ public class OperationService {
     public Confirmation confirmOperation(
         UUID organizationId,
         UUID operationId,
-        UUID actorUserId,
         String previewFingerprint,
         Boolean productionAck
     ) {
+        // CRITICAL: Get authoritative actor_id from authenticated session
+        UUID actorUserId = operatorAuthService.getAuthenticatedActorId();
+        
+        // Validate operator has access to specified organization
+        operatorAuthService.requireOrganizationAccess(organizationId);
         Operation operation = operationRepository.findByIdAndOrganizationId(operationId, organizationId)
             .orElseThrow(() -> new IllegalArgumentException("Operation not found"));
         
@@ -175,9 +187,13 @@ public class OperationService {
     @Transactional
     public SignedCommand executeOperation(
         UUID organizationId,
-        UUID operationId,
-        UUID actorUserId
+        UUID operationId
     ) {
+        // CRITICAL: Get authoritative actor_id from authenticated session
+        UUID actorUserId = operatorAuthService.getAuthenticatedActorId();
+        
+        // Validate operator has access to specified organization
+        operatorAuthService.requireOrganizationAccess(organizationId);
         Operation operation = operationRepository.findByIdAndOrganizationId(operationId, organizationId)
             .orElseThrow(() -> new IllegalArgumentException("Operation not found"));
         

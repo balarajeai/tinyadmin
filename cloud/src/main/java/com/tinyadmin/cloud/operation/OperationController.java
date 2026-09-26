@@ -25,13 +25,13 @@ public class OperationController {
     ) {
         log.info("Creating preview for action: {}", request.getActionDefinitionId());
         
+        // CRITICAL: actor_id from authenticated session, NOT client-supplied
         Operation operation = operationService.createPreview(
             request.getOrganizationId(),
             request.getEnvironmentId(),
             request.getAgentId(),
             request.getConnectionId(),
             request.getActionDefinitionId(),
-            request.getActorUserId(),
             request.getTarget()
         );
         
@@ -48,10 +48,10 @@ public class OperationController {
     ) {
         log.info("Confirming operation: {}", request.getOperationId());
         
+        // CRITICAL: actor_id from authenticated session, NOT client-supplied
         Confirmation confirmation = operationService.confirmOperation(
             request.getOrganizationId(),
             request.getOperationId(),
-            request.getActorUserId(),
             request.getPreviewFingerprint(),
             request.getProductionAck()
         );
@@ -69,10 +69,10 @@ public class OperationController {
     ) {
         log.info("Executing operation: {}", request.getOperationId());
         
+        // CRITICAL: actor_id from authenticated session, NOT client-supplied
         SignedCommand command = operationService.executeOperation(
             request.getOrganizationId(),
-            request.getOperationId(),
-            request.getActorUserId()
+            request.getOperationId()
         );
         
         return ResponseEntity.ok(Map.of(
