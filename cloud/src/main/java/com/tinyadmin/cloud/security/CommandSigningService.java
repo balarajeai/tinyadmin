@@ -18,6 +18,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -178,8 +179,8 @@ public class CommandSigningService {
         envelope.put("max_affected_records", maxAffectedRecords);
         
         Instant now = Instant.now();
-        envelope.put("iat", now.getEpochSecond());
-        envelope.put("exp", now.plusSeconds(300).getEpochSecond());
+        envelope.put("iat", DateTimeFormatter.ISO_INSTANT.format(now));
+        envelope.put("exp", DateTimeFormatter.ISO_INSTANT.format(now.plusSeconds(300)));
         
         String signature = signEnvelope(envelope);
         envelope.put("signature", signature);
@@ -193,11 +194,14 @@ public class CommandSigningService {
     /**
      * Signs envelope using Ed25519 over RFC 8785 JCS canonical bytes.
      * Signature is base64url-encoded raw Ed25519 signature (64 bytes).
+     * Per Agent PR #24: signature field must be present as empty string during canonicalization.
      * Uses BouncyCastle provider for consistent Ed25519 handling.
      */
     private String signEnvelope(Map<String, Object> envelopeWithoutSignature) {
         try {
-            String json = objectMapper.writeValueAsString(envelopeWithoutSignature);
+            Map<String, Object> envelopeCopy = new LinkedHashMap<>(envelopeWithoutSignature);
+            envelopeCopy.put("signature", "");
+            String json = objectMapper.writeValueAsString(envelopeCopy);
             byte[] canonicalBytes = canonicalizer.canonicalize(json);
             
             Signature signature = Signature.getInstance("Ed25519", BouncyCastleProvider.PROVIDER_NAME);
@@ -215,6 +219,7 @@ public class CommandSigningService {
     /**
      * Verifies envelope signature for testing and Cloud self-check.
      * Agent will implement independent verification using public key.
+     * Per Agent PR #24: signature field must be present as empty string during canonicalization.
      * Does not mutate the input envelope map.
      * Uses BouncyCastle provider for consistent Ed25519 handling.
      */
@@ -222,11 +227,12 @@ public class CommandSigningService {
         try {
             // Copy envelope to avoid mutating caller's map
             Map<String, Object> envelopeCopy = new LinkedHashMap<>(envelope);
-            String signatureB64 = (String) envelopeCopy.remove("signature");
-            if (signatureB64 == null) {
+            String signatureB64 = (String) envelopeCopy.get("signature");
+            if (signatureB64 == null || signatureB64.isEmpty()) {
                 return false;
             }
             
+            envelopeCopy.put("signature", "");
             String json = objectMapper.writeValueAsString(envelopeCopy);
             byte[] canonicalBytes = canonicalizer.canonicalize(json);
             

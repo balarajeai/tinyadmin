@@ -203,40 +203,26 @@ public class AgentOperationController {
     }
     
     /**
-     * Builds authenticated result_ack response matching Agent PR #24 wire format (SEC-PR23-003).
+     * Builds result_ack response matching Agent PR #24 e3a006885cb79f0123da8404feb4c7cf4b81272f.
      * 
-     * Response shape per Issue #3 / Agent PR #24:
+     * Response shape per Agent PR #24:
      * {
-     *   "result": "acknowledged",
      *   "operation_id": "<uuid>",
-     *   "status": "succeeded|failed|unknown",
-     *   "idempotent": true|false (optional),
-     *   "result_ack": {
-     *     "ack_signature": "<base64url-encoded-ed25519-sig>",
-     *     "ack_payload_digest": "<hex-sha256>"
-     *   }
+     *   "acknowledged": true
      * }
      * 
-     * CRITICAL: Agent MUST verify ack_signature with Cloud command-signing public key
-     * before deleting durable result.
+     * Agent clears durable result on acknowledged=true.
+     * Agent does NOT verify ack signatures per PR #24.
      */
     private ResponseEntity<Map<String, Object>> buildAuthenticatedAckResponse(
             UUID operationId, 
             OperationLifecycleStatus status,
             boolean idempotent) {
         
-        // Create authenticated ack with real Ed25519 signature
-        Map<String, String> resultAck = resultAckService.createAuthenticatedAck(operationId);
-        
-        // Build response matching Agent PR #24 wire format
+        // Build response matching Agent PR #24 exact wire format
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("result", "acknowledged");
         response.put("operation_id", operationId.toString());
-        response.put("status", status.toString().toLowerCase());
-        if (idempotent) {
-            response.put("idempotent", true);
-        }
-        response.put("result_ack", resultAck);
+        response.put("acknowledged", true);
         
         return ResponseEntity.ok(response);
     }

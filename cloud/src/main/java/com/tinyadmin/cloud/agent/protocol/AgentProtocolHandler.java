@@ -321,13 +321,10 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
             }
         }
         
-        // Create authenticated result_ack (SEC-PR12-005)
-        Map<String, String> ackData = resultAckService.createAuthenticatedAck(operationId);
-        
+        // Create simple result_ack per Agent PR #24
         ResultAckMessage ack = ResultAckMessage.builder()
-                .operationId(operationId)
-                .ackSignature(ackData.get("ack_signature"))
-                .ackPayloadDigest(ackData.get("ack_payload_digest"))
+                .operationId(operationId.toString())
+                .acknowledged(true)
                 .build();
         ack.setMessageType("result_ack");
         ack.setProtocolVersion(CURRENT_PROTOCOL_VERSION);

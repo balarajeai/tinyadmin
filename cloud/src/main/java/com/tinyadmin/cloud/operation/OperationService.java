@@ -191,7 +191,13 @@ public class OperationService {
         
         confirmation = confirmationRepository.save(confirmation);
         
+        // CRITICAL: Lifecycle state transition PREVIEWED → CONFIRMED
+        if (operation.getLifecycleStatus() != OperationLifecycleStatus.PREVIEWED) {
+            throw new IllegalStateException("Cannot confirm operation in state: " + operation.getLifecycleStatus());
+        }
+        
         operation.setConfirmationId(confirmation.getId());
+        operation.setLifecycleStatus(OperationLifecycleStatus.CONFIRMED);
         operationRepository.save(operation);
         
         auditService.recordEvent(AuditService.builder()
@@ -268,6 +274,14 @@ public class OperationService {
         mutationPayload.put("parameters", operation.getParameters() != null ? parseJson(operation.getParameters()) : Map.of());
         mutationPayload.put("max_affected_records", maxAffected);
         
+        // CRITICAL: Lifecycle state transition CONFIRMED → PENDING_RESULT
+        if (operation.getLifecycleStatus() != OperationLifecycleStatus.CONFIRMED) {
+            throw new IllegalStateException("Cannot execute operation in state: " + operation.getLifecycleStatus());
+        }
+        
+        operation.setLifecycleStatus(OperationLifecycleStatus.PENDING_RESULT);
+        operationRepository.save(operation);
+        
         SignedCommand command = commandSigningService.createSignedCommand(
             operation.getId(),
             operation.getOrganization().getId(),
@@ -280,61 +294,12 @@ public class OperationService {
             maxAffected
         );
         
-        log.info("Signed command created: operationId={}", operationId);
+        log.info("Signed command created: operationId={} (state: PENDING_RESULT)", operationId);
         
         return command;
     }
     
     @Transactional
-    public void ingestResult(
-        UUID operationId,
-        String resultStatus,
-        String beforeState,
-        String afterState
-    ) {
-        Operation operation = operationRepository.findById(operationId)
-            .orElseThrow(() -> new IllegalArgumentException("Operation not found"));
-        
-        OperationLifecycleStatus lifecycleStatus;
-        String eventType;
-        
-        switch (resultStatus.toLowerCase()) {
-            case "succeeded":
-                lifecycleStatus = OperationLifecycleStatus.SUCCEEDED;
-                eventType = "mutation_succeeded";
-                break;
-            case "failed":
-                lifecycleStatus = OperationLifecycleStatus.FAILED;
-                eventType = "mutation_failed";
-                break;
-            case "unknown":
-                lifecycleStatus = OperationLifecycleStatus.UNKNOWN;
-                eventType = "mutation_unknown";
-                break;
-            default:
-                throw new IllegalArgumentException("Invalid result status: " + resultStatus);
-        }
-        
-        operation.setLifecycleStatus(lifecycleStatus);
-        operationRepository.save(operation);
-        
-        auditService.recordEvent(AuditService.builder()
-            .organization(operation.getOrganization())
-            .environment(operation.getEnvironment())
-            .operationId(operationId)
-            .actorUserId(operation.getActorUserId())
-            .agentId(operation.getAgent() != null ? operation.getAgent().getId() : null)
-            .connectionId(operation.getConnection() != null ? operation.getConnection().getId() : null)
-            .actionDefinitionId(operation.getActionDefinition() != null ? operation.getActionDefinition().getId() : null)
-            .eventType(eventType)
-            .target(operation.getTarget())
-            .beforeState(beforeState)
-            .afterState(afterState)
-            .resultStatus(resultStatus));
-        
-        log.info("Result ingested: operationId={}, status={}", operationId, resultStatus);
-    }
-    
     private String serializeToJson(Object obj) {
         try {
             return objectMapper.writeValueAsString(obj);

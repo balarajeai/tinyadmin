@@ -81,25 +81,6 @@ public class OperationController {
         ));
     }
     
-    @PostMapping("/results")
-    public ResponseEntity<Map<String, Object>> ingestResult(
-        @Valid @RequestBody IngestResultRequest request
-    ) {
-        log.info("Ingesting result for operation: {}", request.getOperationId());
-        
-        operationService.ingestResult(
-            request.getOperationId(),
-            request.getResultStatus(),
-            request.getBeforeState(),
-            request.getAfterState()
-        );
-        
-        return ResponseEntity.ok(Map.of(
-            "operationId", request.getOperationId(),
-            "status", "ingested"
-        ));
-    }
-    
     @GetMapping("/{operationId}")
     public ResponseEntity<OperationResponse> getOperation(
         @PathVariable UUID operationId,
