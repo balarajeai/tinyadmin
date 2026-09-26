@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -79,6 +80,9 @@ func (c *Config) Validate() error {
 
 	if c.Cloud.Endpoint == "" {
 		return errors.New("cloud.endpoint is required")
+	}
+	if !strings.HasPrefix(c.Cloud.Endpoint, "wss://") {
+		return errors.New("cloud.endpoint must use wss:// (secure WebSocket)")
 	}
 	if c.Cloud.CommandSigningKey == "" {
 		return errors.New("cloud.command_signing_key is required")

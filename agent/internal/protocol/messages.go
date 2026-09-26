@@ -173,6 +173,61 @@ func ValidateEnvelope(envelope *AuthorizationEnvelope, agentOrgID, agentEnvID, a
 	return nil
 }
 
+func ValidateActionBinding(cmd *Command, expectedActionID string) error {
+	// Validate envelope action_or_field_op
+	envActionOp, ok := cmd.Authorization.ActionOrFieldOp.(map[string]any)
+	if !ok {
+		return errors.New("envelope action_or_field_op must be an object")
+	}
+
+	envActionType, ok := envActionOp["type"].(string)
+	if !ok || envActionType != "action" {
+		return fmt.Errorf("envelope action_or_field_op.type must be 'action', got %v", envActionType)
+	}
+
+	envActionDefID, ok := envActionOp["action_definition_id"].(string)
+	if !ok {
+		return errors.New("envelope action_definition_id is required for action type")
+	}
+
+	// Validate payload exists and has action_or_field_op
+	var payload MutationPayload
+	if err := json.Unmarshal(cmd.Payload, &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
+
+	payloadActionOp, ok := payload.ActionOrFieldOp.(map[string]any)
+	if !ok {
+		return errors.New("payload action_or_field_op must be an object")
+	}
+
+	payloadActionType, ok := payloadActionOp["type"].(string)
+	if !ok || payloadActionType != "action" {
+		return fmt.Errorf("payload action_or_field_op.type must be 'action', got %v", payloadActionType)
+	}
+
+	payloadActionDefID, ok := payloadActionOp["action_definition_id"].(string)
+	if !ok {
+		return errors.New("payload action_definition_id is required for action type")
+	}
+
+	// Envelope and payload action fields must match
+	if envActionType != payloadActionType {
+		return fmt.Errorf("action type mismatch: envelope=%s, payload=%s", envActionType, payloadActionType)
+	}
+
+	if envActionDefID != payloadActionDefID {
+		return fmt.Errorf("action_definition_id mismatch: envelope=%s, payload=%s", envActionDefID, payloadActionDefID)
+	}
+
+	// Validate against expected action ID if provided
+	if expectedActionID != "" && envActionDefID != expectedActionID {
+		return fmt.Errorf("action_definition_id mismatch: expected %s, got %s", expectedActionID, envActionDefID)
+	}
+
+	return nil
+}
+
 func ValidateMutatingCommand(cmd *Command, expectedActionID string) error {
 	if cmd.Authorization.MutationPayloadSHA256 == "" {
 		return errors.New("mutation_payload_sha256 is required for mutating commands")

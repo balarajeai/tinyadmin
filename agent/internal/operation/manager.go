@@ -145,6 +145,23 @@ func (m *Manager) HandleCommand(ctx context.Context, cmd *protocol.Command) (*pr
 }
 
 func (m *Manager) handlePreview(ctx context.Context, env *protocol.AuthorizationEnvelope, payload json.RawMessage, dsn string) (*protocol.ResultMessage, error) {
+	cmd := &protocol.Command{
+		CommandType:   protocol.CommandTypePreview,
+		Authorization: env,
+		Payload:       payload,
+	}
+	
+	if err := protocol.ValidateActionBinding(cmd, action.UnlockUserActionID); err != nil {
+		m.logger.Error("preview action binding validation failed", "operation_id", env.OperationID, "error", err)
+		
+		result := m.buildErrorResult(env.OperationID, fmt.Sprintf("action binding validation failed: %v", err))
+		if err := m.recordResult(env.OperationID, storage.StateFailed, result); err != nil {
+			return nil, fmt.Errorf("failed to record validation failure: %w", err)
+		}
+		
+		return result, nil
+	}
+	
 	var mutPayload protocol.MutationPayload
 	if err := json.Unmarshal(payload, &mutPayload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal mutation payload: %w", err)

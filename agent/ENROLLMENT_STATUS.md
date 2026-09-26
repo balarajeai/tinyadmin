@@ -2,36 +2,73 @@
 
 ## Enrollment / Outbound Identity Status
 
-### IMPLEMENTED NOW
+### IMPLEMENTED AGENT-SIDE
 - **Agent Ed25519 keypair generation and storage** (`internal/identity`)
   - Generate, load, save Ed25519 keys
-  - Sign messages with Agent private key (for future Agent→Cloud signed requests)
+  - Sign messages with Agent private key
   - Verify Cloud signatures on incoming commands
 - **Cloud command signature verification** (`internal/protocol`)
-  - Verify Ed25519 signatures on authorization envelopes
-  - Validate payload digest (SHA-256 over JCS canonical mutation payload)
+  - Verify Ed25519 signatures on authorization envelopes using base64url encoding
+  - Validate payload digest (SHA-256 over RFC 8785 JCS canonical mutation payload)
+  - Action binding validation (envelope and payload action_or_field_op consistency)
   - Fail-closed on tampering, mismatched org/env/agent/connection, expired envelopes
 - **Outbound WSS client** (`internal/cloud`)
   - Dial Cloud WSS endpoint over TLS (no inbound Agent port)
   - Reconnect with exponential backoff
   - Send heartbeats
-  - Receive commands, result_ack, cancel/revoke sync
+  - Receive commands, result_ack, cancel/revoke sync responses
+  - Mutex-protected WebSocket write serialization
+- **Challenge-response session authentication** (`internal/cloud/client.go`)
+  - Receive `challenge` messages from Cloud
+  - Sign challenge nonces with Agent Ed25519 private key
+  - Send `challenge_response` messages to Cloud
+  - Receive `session_ok` or `session_failed` responses
+  - **Session authentication gate**: Reject commands, cancel/revoke sync, and result_ack until session is authenticated
+- **Cancel/revoke synchronization on reconnect** (`internal/cloud/client.go`)
+  - Send `cancel_revoke_sync_request` message after session authenticated
+  - Receive `cancel_revoke_sync_response` with authoritative revoked operation IDs
+  - Notify operation manager to transition revoked operations to `unknown` state
+  - Full bidirectional sync implemented agent-side
+- **Authenticated result_ack handling** (`internal/cloud/client.go`)
+  - Receive `result_ack` messages from Cloud
+  - Validate session is authenticated before processing ack
+  - Notify storage layer to mark results as acknowledged
+  - Fail-closed: ignore result_ack if session not authenticated
+- **Durable result retry** (`internal/operation/manager.go`, `internal/storage`)
+  - SQLite WAL mode with busy_timeout for concurrency
+  - Persist results to storage before WSS send
+  - Retry unacked results until Cloud sends authenticated `result_ack`
+  - Crash recovery: transition in-flight operations to `unknown` state on startup
+- **Mandatory mutation payload digest** (`internal/protocol/messages.go`)
+  - Enforce `mutation_payload_sha256` presence for all mutating commands (execute)
+  - Compute canonical JSON digest using RFC 8785 JCS (`github.com/gowebpki/jcs`)
+  - Reject commands with missing or mismatched digest
+- **Action binding enforcement** (`internal/protocol/messages.go`, `internal/operation/manager.go`)
+  - Validate action_or_field_op.type == "action" for preview and execute
+  - Validate action_definition_id matches expected Unlock User Action ID
+  - Enforce envelope and payload action binding consistency
+  - Reject preview and execute for unauthorized or mismatched actions
 
-### STUBBED (Cloud #18 dependency)
-- **Challenge-response session authentication**
-  - Protocol structure exists in docs
-  - Agent WSS client connects but does not implement challenge-response handshake yet
-  - Cloud backend (#18) will implement challenge issuance and verification
-  - Agent will add challenge-response in future iteration when Cloud is ready
-- **Cancel/revoke synchronization on reconnect**
-  - `syncCancelRevoke()` method exists in `internal/cloud/client.go`
-  - Sends `cancel_revoke_sync_request` message
-  - Calls registered cancel/revoke handler
-  - Full bidirectional sync semantics depend on Cloud #18 implementation
+### CLOUD DEPENDENCY (requires Cloud Issue #18)
+- **Cloud challenge issuance**
+  - Cloud WSS gateway must send `challenge` messages with fresh nonces
+  - Cloud must implement challenge verification and session establishment
+- **Cloud session_ok/session_failed responses**
+  - Cloud must verify Agent's challenge_response signature
+  - Cloud must send `session_ok` or `session_failed` to complete authentication
+- **Authoritative cancel/revoke response**
+  - Cloud must implement `cancel_revoke_sync_response` with authoritative revoked operation list
+  - Cloud must persist and track operation revocations
+- **Cloud authenticated result_ack**
+  - Cloud must send `result_ack` messages for durable result delivery
+  - Cloud must persist Agent results
+- **Cloud WSS endpoint for E2E**
+  - Cloud must deploy WSS gateway accepting Agent connections
+  - Cloud must implement command signing service with Ed25519
 
 ### DEFERRED (not required for Issue #19 vertical slice)
 - **HTTPS enrollment flow**
-  - Full one-time token exchange with Cloud `/agent/v1/activate`
+  - Full one-time token exchange with Cloud `POST /agent/v1/activate`
   - Agent stores Cloud command-signing public key from enrollment response
   - Cloud stores Agent public key
   - Owned by Cloud backend Issue #18
@@ -39,33 +76,32 @@
   - Protocol document specifies `POST /agent/v1/results` for non-WSS delivery
   - Agent currently sends results only via WSS
   - Will add HTTPS fallback when Cloud endpoint is ready
-- **Agent-signed outbound messages** (rotation, result delivery auth)
-  - Agent can sign (identity package supports it)
-  - Protocol structure exists
-  - Full end-to-end flow deferred until Cloud #18 defines exact message formats
+- **Key rotation**
+  - Agent supports signing/verification primitives
+  - Full rotation protocol and Agent-signed outbound message expansion deferred
 
 ## Issue #3 Compliance Status
 
-| Requirement | Status | Evidence |
-| --- | --- | --- |
-| Agent-initiated outbound only | ✅ COMPLETE | WSS client dials Cloud; no inbound port |
-| TLS on all communication | ✅ COMPLETE | WSS uses TLS; HTTPS enrollment deferred to #18 |
-| Ed25519 Agent identity | ✅ COMPLETE | Keypair generation, storage, signing, verification |
-| Cloud-signed command envelopes | ✅ COMPLETE | Signature + digest verification, fail-closed |
-| Durable result delivery | ✅ COMPLETE | SQLite unacked results, retry until authenticated ack |
-| Operation state machine | ✅ COMPLETE | received→authorized→executing→succeeded/failed/unknown |
-| Idempotency | ✅ COMPLETE | SQLite deduplication, operation_id enforcement |
-| Cancel/revoke before execution | ⚠️ STUBBED | Method exists, awaits Cloud #18 full sync |
-| Challenge-response session auth | ⚠️ STUBBED | Awaits Cloud #18 challenge issuance |
-| HTTPS result fallback | 🔲 DEFERRED | Not required for vertical slice |
-| Full enrollment flow | 🔲 DEFERRED | Owned by Cloud #18 |
+| Requirement | Agent Status | Cloud Status | Notes |
+| --- | --- | --- | --- |
+| Agent-initiated outbound only | ✅ COMPLETE | ⏳ REQUIRED | WSS client dials Cloud; no inbound port |
+| TLS on all communication | ✅ COMPLETE | ⏳ REQUIRED | Strict wss:// enforcement; HTTPS enrollment deferred |
+| Ed25519 Agent identity | ✅ COMPLETE | ⏳ REQUIRED | Keypair generation, storage, signing, verification |
+| Cloud-signed command envelopes | ✅ COMPLETE | ⏳ REQUIRED | Signature + digest verification, fail-closed |
+| Durable result delivery | ✅ COMPLETE | ⏳ REQUIRED | SQLite unacked results, retry until authenticated ack |
+| Operation state machine | ✅ COMPLETE | N/A | received→authorized→executing→succeeded/failed/unknown |
+| Idempotency | ✅ COMPLETE | N/A | SQLite deduplication, operation_id enforcement |
+| Cancel/revoke before execution | ✅ COMPLETE | ⏳ REQUIRED | Agent sync implemented; awaits Cloud authoritative response |
+| Challenge-response session auth | ✅ COMPLETE | ⏳ REQUIRED | Agent challenge-response and session gate implemented; awaits Cloud challenge issuance |
+| HTTPS result fallback | 🔲 DEFERRED | 🔲 DEFERRED | Not required for vertical slice |
+| Full enrollment flow | 🔲 DEFERRED | 🔲 DEFERRED | Owned by Cloud #18 |
 
 ## Ready For
 - **Code Review**: YES (Agent-side protocol implementation complete)
-- **QA**: YES (unit tests pass, integration tests skip gracefully when PostgreSQL unavailable)
-- **Security Review**: YES (all blocking security requirements implemented; challenge-response stub documented)
-- **Cloud #18 Integration**: READY (Agent can receive and verify Cloud-signed commands when #18 implements signing)
+- **QA**: YES (unit tests pass, integration tests use real PostgreSQL when available)
+- **Security Review**: YES (all blocking security requirements implemented agent-side)
+- **Cloud #18 Integration**: READY (Agent can receive and verify Cloud-signed commands; challenge-response ready)
 
 ## Not Ready For
 - **Production deployment**: NO (requires Cloud #18 backend implementation)
-- **End-to-end testing**: NO (requires Cloud #18 WSS gateway and command signing)
+- **End-to-end Issue #3 compliance**: NO (requires Cloud #18 WSS gateway, command signing, challenge issuance, result_ack)
