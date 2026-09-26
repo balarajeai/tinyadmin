@@ -36,12 +36,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AgentProtocolHandler extends TextWebSocketHandler {
     
     private final AgentSessionAuthService sessionAuthService;
+    private final AgentSessionStore sessionStore;
     private final ResultAckService resultAckService;
     private final CommandSigningService commandSigningService;
     private final OperationRepository operationRepository;
     private final ObjectMapper objectMapper;
     
-    // WebSocket session ID → Agent session mapping
+    // WebSocket session ID → Agent session mapping (for active WSS connections)
     private final Map<String, AgentSession> activeSessions = new ConcurrentHashMap<>();
     
     // Protocol version (V1)
@@ -49,11 +50,13 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
     
     public AgentProtocolHandler(
             AgentSessionAuthService sessionAuthService,
+            AgentSessionStore sessionStore,
             ResultAckService resultAckService,
             CommandSigningService commandSigningService,
             OperationRepository operationRepository,
             ObjectMapper objectMapper) {
         this.sessionAuthService = sessionAuthService;
+        this.sessionStore = sessionStore;
         this.resultAckService = resultAckService;
         this.commandSigningService = commandSigningService;
         this.operationRepository = operationRepository;
@@ -206,6 +209,9 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
         );
         authenticatedSession.setSessionId(session.getId());
         activeSessions.put(session.getId(), authenticatedSession);
+        
+        // CRITICAL (SEC-PR23-002): Store authenticated session for result ingestion validation
+        sessionStore.storeSession(authenticatedSession);
         
         log.info("Agent authenticated: sessionId={} agentId={} orgId={} envId={}", 
                  session.getId(), agent.getId(), agent.getOrganization().getId(), agent.getEnvironment().getId());
