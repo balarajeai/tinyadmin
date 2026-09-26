@@ -1,0 +1,6 @@
+# Test-only configuration
+# Allows ephemeral signing keys for integration tests
+
+tinyadmin:
+  signing:
+    allow-ephemeral: true

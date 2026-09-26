@@ -1,0 +1,32 @@
+{
+  "envelope": {
+    "kid": "cloud-signing-key-v1",
+    "operation_id": "a1b2c3d4-1234-5678-90ab-cdef12345678",
+    "actor_id": "f9e8d7c6-5432-1098-fedc-ba9876543210",
+    "organization_id": "00000000-0000-0000-0000-000000000001",
+    "environment_id": "00000000-0000-0000-0000-000000000002",
+    "agent_id": "00000000-0000-0000-0000-000000000003",
+    "connection_id": "00000000-0000-0000-0000-000000000004",
+    "action_or_field_op": {
+      "type": "action",
+      "action_definition_id": "00000000-0000-0000-0000-000000000005"
+    },
+    "mutation_payload_sha256": "a7b9c2d1e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1",
+    "max_affected_records": 1,
+    "iat": 1695497000,
+    "exp": 1695497300,
+    "signature": "aGVsbG93b3JsZHRoaXNpc2FuZXhhbXBsZXNpZ25hdHVyZWJhc2U2NHVybGVuY29kZWQ"
+  },
+  "mutationPayload": {
+    "action_or_field_op": {
+      "type": "action",
+      "action_definition_id": "00000000-0000-0000-0000-000000000005"
+    },
+    "targets": {
+      "userId": "user123",
+      "email": "locked@example.com"
+    },
+    "parameters": {},
+    "max_affected_records": 1
+  }
+}

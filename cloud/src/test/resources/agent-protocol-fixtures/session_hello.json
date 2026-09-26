@@ -1,0 +1,5 @@
+{
+  "message_type": "session_hello",
+  "protocol_version": 1,
+  "agent_id": "00000000-0000-0000-0000-000000000003"
+}

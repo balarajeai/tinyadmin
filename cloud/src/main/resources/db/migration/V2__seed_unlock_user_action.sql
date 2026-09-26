@@ -1,0 +1,4 @@
+-- V2: Production seed migration
+-- Empty for this slice - Action definitions require organization_id (NOT NULL)
+-- Product seed will happen during org bootstrap (out of scope for Issue #18)
+-- Test fixtures seeded in V99__test_data.sql for integration tests
