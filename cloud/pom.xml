@@ -73,6 +73,13 @@
             <version>1.78.1</version>
         </dependency>
         
+        <!-- RFC 8785 JSON Canonicalization (JCS) - proven implementation -->
+        <dependency>
+            <groupId>io.github.erdtman</groupId>
+            <artifactId>java-json-canonicalization</artifactId>
+            <version>1.1</version>
+        </dependency>
+        
         <!-- Jackson for JSON processing with canonical configuration -->
 
         <!-- Test Dependencies -->

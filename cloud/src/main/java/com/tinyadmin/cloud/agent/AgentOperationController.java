@@ -2,6 +2,7 @@ package com.tinyadmin.cloud.agent;
 
 import com.tinyadmin.cloud.agent.protocol.AgentSession;
 import com.tinyadmin.cloud.agent.protocol.AgentSessionStore;
+import com.tinyadmin.cloud.agent.protocol.ResultAckService;
 import com.tinyadmin.cloud.operation.Operation;
 import com.tinyadmin.cloud.operation.OperationLifecycleStatus;
 import com.tinyadmin.cloud.operation.OperationRepository;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -46,6 +48,7 @@ public class AgentOperationController {
     private final OperationRepository operationRepository;
     private final AgentSessionStore sessionStore;
     private final AgentRepository agentRepository;
+    private final ResultAckService resultAckService;
     
     /**
      * Agent result ingestion with authenticated session validation (SEC-PR23-002).
@@ -157,12 +160,8 @@ public class AgentOperationController {
                 log.info("Result ingestion: duplicate terminal result (idempotent) for operation {}", 
                         request.getOperationId());
                 // Idempotent: same result repeated safely
-                return ResponseEntity.ok(Map.of(
-                        "result", "acknowledged",
-                        "operation_id", request.getOperationId().toString(),
-                        "status", newStatus.toString(),
-                        "idempotent", true
-                ));
+                // SEC-PR23-003: Return authenticated result_ack matching Agent PR #24
+                return buildAuthenticatedAckResponse(request.getOperationId(), newStatus, true);
             } else {
                 // Conflicting terminal result - REJECT
                 log.error("Result ingestion: conflicting terminal result for operation {}: existing={}, new={}", 
@@ -187,11 +186,8 @@ public class AgentOperationController {
         log.info("Result ingested: operation_id={} status={} agent_id={}", 
                 request.getOperationId(), newStatus, agentId);
         
-        return ResponseEntity.ok(Map.of(
-                "result", "acknowledged",
-                "operation_id", request.getOperationId().toString(),
-                "status", newStatus.toString()
-        ));
+        // SEC-PR23-003: Return authenticated result_ack matching Agent PR #24 wire format
+        return buildAuthenticatedAckResponse(request.getOperationId(), newStatus, false);
     }
     
     /**
@@ -204,6 +200,45 @@ public class AgentOperationController {
             case "unknown" -> OperationLifecycleStatus.UNKNOWN;
             default -> null;
         };
+    }
+    
+    /**
+     * Builds authenticated result_ack response matching Agent PR #24 wire format (SEC-PR23-003).
+     * 
+     * Response shape per Issue #3 / Agent PR #24:
+     * {
+     *   "result": "acknowledged",
+     *   "operation_id": "<uuid>",
+     *   "status": "succeeded|failed|unknown",
+     *   "idempotent": true|false (optional),
+     *   "result_ack": {
+     *     "ack_signature": "<base64url-encoded-ed25519-sig>",
+     *     "ack_payload_digest": "<hex-sha256>"
+     *   }
+     * }
+     * 
+     * CRITICAL: Agent MUST verify ack_signature with Cloud command-signing public key
+     * before deleting durable result.
+     */
+    private ResponseEntity<Map<String, Object>> buildAuthenticatedAckResponse(
+            UUID operationId, 
+            OperationLifecycleStatus status,
+            boolean idempotent) {
+        
+        // Create authenticated ack with real Ed25519 signature
+        Map<String, String> resultAck = resultAckService.createAuthenticatedAck(operationId);
+        
+        // Build response matching Agent PR #24 wire format
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("result", "acknowledged");
+        response.put("operation_id", operationId.toString());
+        response.put("status", status.toString().toLowerCase());
+        if (idempotent) {
+            response.put("idempotent", true);
+        }
+        response.put("result_ack", resultAck);
+        
+        return ResponseEntity.ok(response);
     }
     
     /**
