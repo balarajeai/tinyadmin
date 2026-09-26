@@ -11,17 +11,26 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Action bootstrap service (Finding #10 - Production Action Bootstrap).
+ * Action bootstrap service (Blocker #8 - Production Action Bootstrap).
  * 
  * Provides mechanism to create standard Actions (e.g., Unlock User)
  * for production organizations without relying on V99 test data.
  * 
  * Actions are org-scoped; each org gets their own Action instances.
+ * Test org uses fixed UUID matching Agent PR #24.
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ActionBootstrapService {
+    
+    /**
+     * Shared Unlock User Action UUID for test organization.
+     * Matches Agent PR #24 e3a006885cb79f0123da8404feb4c7cf4b81272f constant.
+     * Seeded in V99__test_data.sql for integration tests.
+     * Production orgs get dynamically generated UUIDs.
+     */
+    public static final UUID TEST_UNLOCK_USER_ACTION_ID = UUID.fromString("00000000-0000-0000-0000-000000000005");
     
     private final ActionDefinitionRepository actionDefinitionRepository;
     private final OrganizationRepository organizationRepository;

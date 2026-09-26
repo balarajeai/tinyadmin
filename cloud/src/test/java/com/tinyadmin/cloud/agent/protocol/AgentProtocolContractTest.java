@@ -147,8 +147,11 @@ class AgentProtocolContractTest {
         
         assertTrue(json.contains("\"message_type\":\"result_ack\""));
         assertTrue(json.contains("\"operation_id\""));
-        assertTrue(json.contains("\"ack_signature\""));
-        assertTrue(json.contains("\"ack_payload_digest\""));
+        assertTrue(json.contains("\"acknowledged\""));
+        
+        ResultAckMessage parsed = objectMapper.readValue(json, ResultAckMessage.class);
+        assertNotNull(parsed.getOperationId());
+        assertTrue(parsed.getAcknowledged());
     }
     
     @Test

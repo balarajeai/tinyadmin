@@ -119,9 +119,9 @@ public class OperationService {
         // CRITICAL: Preview success is NOT mutation terminal success (Finding #7)
         operation.setLifecycleStatus(OperationLifecycleStatus.PREVIEWED);
         
-        // Finding #8: Server-authoritative preview fingerprint
+        // Blocker #6: Server-authoritative preview fingerprint with FULL context
         // Compute from server-owned preview data (not client-supplied)
-        String previewFingerprint = computePreviewFingerprint(preview);
+        String previewFingerprint = computePreviewFingerprint(operation, preview);
         operation.setPreviewFingerprint(previewFingerprint);
         
         operation = operationRepository.save(operation);
@@ -180,6 +180,22 @@ public class OperationService {
                 operation.getActionDefinition().getId() : null;
         if (previewActionId == null) {
             throw new IllegalStateException("Operation has no action definition");
+        }
+        
+        // Blocker #3: Production acknowledgment semantics
+        // Production environment mutations require explicit production ack
+        boolean isProduction = operation.getEnvironment() != null && 
+                              "PRODUCTION".equals(operation.getEnvironment().getKind().toString());
+        ActionDefinition action = operation.getActionDefinition();
+        boolean requiresProductionAck = action != null && Boolean.TRUE.equals(action.getProductionExtraConfirm());
+        
+        if (isProduction && requiresProductionAck) {
+            if (productionAck == null || !productionAck) {
+                log.error("Production acknowledgment required but not provided: operation={} env={}", 
+                         operationId, operation.getEnvironment().getKey());
+                throw new SecurityException("Production acknowledgment required for this operation");
+            }
+            log.info("Production acknowledgment validated: operation={}", operationId);
         }
         
         Confirmation confirmation = Confirmation.builder()
@@ -327,16 +343,42 @@ public class OperationService {
      * 
      * Uses SHA-256 hash of canonical preview representation.
      */
-    private String computePreviewFingerprint(Preview preview) {
+    /**
+     * Computes server-authoritative preview fingerprint (Blocker #6).
+     * 
+     * CRITICAL: Fingerprint must pin ALL confirmation-critical context:
+     * - operation/preview identity
+     * - organization_id, environment_id, agent_id, connection_id
+     * - action_definition_id
+     * - target identity (user_id for Unlock User)
+     * - expected affected records
+     * - preview result/status
+     * 
+     * Prevents cross-operation, cross-action, cross-target, cross-environment replay.
+     * Client cannot forge fingerprint; must echo server-issued value.
+     */
+    private String computePreviewFingerprint(Operation operation, Preview preview) {
         try {
-            // Canonical preview representation for fingerprint
+            // Canonical preview representation with FULL context binding
+            UUID orgId = preview.getOrganization() != null ? preview.getOrganization().getId() : null;
+            UUID envId = preview.getEnvironment() != null ? preview.getEnvironment().getId() : null;
+            UUID agentId = preview.getAgent() != null ? preview.getAgent().getId() : null;
+            UUID connId = preview.getConnection() != null ? preview.getConnection().getId() : null;
+            UUID actionId = operation.getActionDefinition() != null ? operation.getActionDefinition().getId() : null;
+            
             String canonical = String.format(
-                "%s:%s:%s:%d:%s",
-                preview.getId(),
+                "operation_id:%s|preview_id:%s|org_id:%s|env_id:%s|agent_id:%s|conn_id:%s|action_id:%s|target:%s|kind:%s|expected_affected:%d|status:%s",
                 preview.getOperationId(),
-                preview.getKind(),
-                preview.getExpectedAffectedCount(),
-                preview.getStatus()
+                preview.getId(),
+                orgId != null ? orgId.toString() : "null",
+                envId != null ? envId.toString() : "null",
+                agentId != null ? agentId.toString() : "null",
+                connId != null ? connId.toString() : "null",
+                actionId != null ? actionId.toString() : "null",
+                operation.getTarget() != null ? operation.getTarget() : "null",
+                preview.getKind().toString(),
+                preview.getExpectedAffectedCount() != null ? preview.getExpectedAffectedCount() : 0,
+                preview.getStatus().toString()
             );
             
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

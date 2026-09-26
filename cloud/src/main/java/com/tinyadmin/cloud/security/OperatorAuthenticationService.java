@@ -24,33 +24,38 @@ public class OperatorAuthenticationService {
     /**
      * Gets authenticated operator from security context.
      * 
+     * CRITICAL SECURITY (Blocker #2):
+     * - Principal MUST be OperatorAuthenticationPrincipal with server-validated memberships
+     * - String principal (UserDetails username) is REJECTED fail-closed
+     * - Empty membership is REJECTED fail-closed
+     * - Client cannot spoof actor_id or organization membership
+     * 
      * @return Authenticated operator principal, or empty if not authenticated
      */
     public Optional<OperatorAuthenticationPrincipal> getAuthenticatedOperator() {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         
         if (authentication == null || !authentication.isAuthenticated()) {
+            log.warn("No authentication in security context");
             return Optional.empty();
         }
         
         Object principal = authentication.getPrincipal();
-        if (principal instanceof OperatorAuthenticationPrincipal) {
-            return Optional.of((OperatorAuthenticationPrincipal) principal);
+        if (principal instanceof OperatorAuthenticationPrincipal operatorPrincipal) {
+            // CRITICAL: Verify principal has valid organization memberships
+            if (operatorPrincipal.getOrganizationIds() == null || operatorPrincipal.getOrganizationIds().isEmpty()) {
+                log.error("SECURITY: OperatorAuthenticationPrincipal {} has no organization memberships (fail-closed)", 
+                         operatorPrincipal.getUserId());
+                return Optional.empty();
+            }
+            return Optional.of(operatorPrincipal);
         }
         
-        // For V1 test fixtures: allow string principal (username/email)
-        // Production would require full authentication provider
-        if (principal instanceof String) {
-            String email = (String) principal;
-            // Test fixture: create minimal principal
-            // Real implementation would query user/membership database
-            return Optional.of(OperatorAuthenticationPrincipal.builder()
-                    .userId(UUID.nameUUIDFromBytes(email.getBytes()))
-                    .email(email)
-                    .organizationIds(Set.of()) // Empty for unauthenticated test case
-                    .build());
-        }
-        
+        // CRITICAL SECURITY: String principal (UserDetails username) is REJECTED
+        // Production auth MUST use AuthenticationProvider that returns OperatorAuthenticationPrincipal
+        // with server-validated organization memberships
+        log.error("SECURITY: Invalid principal type {}. Expected OperatorAuthenticationPrincipal with validated memberships", 
+                 principal.getClass().getName());
         return Optional.empty();
     }
     

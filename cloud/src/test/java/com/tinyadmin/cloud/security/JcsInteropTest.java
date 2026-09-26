@@ -162,25 +162,82 @@ class JcsInteropTest {
     }
     
     @Test
-    void testSignatureOmissionRule() throws Exception {
-        // Issue #3: Signature field must be omitted from canonical envelope for signing
-        Map<String, Object> envelopeWithSig = new LinkedHashMap<>();
-        envelopeWithSig.put("operation_id", "test");
-        envelopeWithSig.put("iat", 1234567890L);
-        envelopeWithSig.put("signature", "some-signature-value");
+    void testSignatureEmptyStringRule() throws Exception {
+        // Agent PR #24: Signature field must be present as EMPTY STRING during canonicalization
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("operation_id", "00000000-0000-0000-0000-000000000001");
+        envelope.put("organization_id", "00000000-0000-0000-0000-000000000002");
+        envelope.put("agent_id", "00000000-0000-0000-0000-000000000003");
+        envelope.put("iat", "2026-09-26T03:00:00Z");
+        envelope.put("exp", "2026-09-26T03:05:00Z");
+        envelope.put("signature", "");  // Empty string during canonicalization
         
-        // Create copy without signature for canonical signing input
-        Map<String, Object> envelopeForSigning = new LinkedHashMap<>(envelopeWithSig);
-        envelopeForSigning.remove("signature");
+        String json = objectMapper.writeValueAsString(envelope);
+        byte[] canonical = canonicalizer.canonicalize(json);
+        String result = new String(canonical, StandardCharsets.UTF_8);
         
-        String jsonWithSig = objectMapper.writeValueAsString(envelopeWithSig);
-        String jsonWithoutSig = objectMapper.writeValueAsString(envelopeForSigning);
+        // CRITICAL: signature field MUST BE PRESENT with empty string value
+        assertTrue(result.contains("\"signature\":\"\""), 
+                "Signature field must be present as empty string per Agent PR #24");
+    }
+    
+    @Test
+    void testAgentEnvelopeGoldenVector() throws Exception {
+        // Golden vector matching Agent PR #24 e3a006885cb79f0123da8404feb4c7cf4b81272f
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("kid", "cloud-signing-key-v1");
+        envelope.put("operation_id", "12345678-1234-5678-1234-567812345678");
+        envelope.put("actor_id", "actor-123");
+        envelope.put("organization_id", "00000000-0000-0000-0000-000000000001");
+        envelope.put("environment_id", "00000000-0000-0000-0000-000000000002");
+        envelope.put("agent_id", "00000000-0000-0000-0000-000000000003");
+        envelope.put("connection_id", "00000000-0000-0000-0000-000000000004");
         
-        byte[] canonicalWithoutSig = canonicalizer.canonicalize(jsonWithoutSig);
+        Map<String, Object> actionOp = new LinkedHashMap<>();
+        actionOp.put("type", "action");
+        actionOp.put("action_definition_id", "00000000-0000-0000-0000-000000000005");
+        envelope.put("action_or_field_op", actionOp);
         
-        // The canonical form WITHOUT signature is what gets signed
-        String resultWithoutSig = new String(canonicalWithoutSig, StandardCharsets.UTF_8);
-        assertFalse(resultWithoutSig.contains("signature"), 
-                "Signature field must not be in canonical signing input");
+        envelope.put("mutation_payload_sha256", "abc123");
+        envelope.put("max_affected_records", 1);
+        envelope.put("iat", "2026-09-26T03:00:00Z");
+        envelope.put("exp", "2026-09-26T03:05:00Z");
+        envelope.put("signature", "");
+        
+        String json = objectMapper.writeValueAsString(envelope);
+        byte[] canonical = canonicalizer.canonicalize(json);
+        String result = new String(canonical, StandardCharsets.UTF_8);
+        
+        // Expected canonical form (golden vector) - exact byte-for-byte match required
+        String expectedCanonical = 
+            "{\"action_or_field_op\":{\"action_definition_id\":\"00000000-0000-0000-0000-000000000005\",\"type\":\"action\"}," +
+            "\"actor_id\":\"actor-123\"," +
+            "\"agent_id\":\"00000000-0000-0000-0000-000000000003\"," +
+            "\"connection_id\":\"00000000-0000-0000-0000-000000000004\"," +
+            "\"environment_id\":\"00000000-0000-0000-0000-000000000002\"," +
+            "\"exp\":\"2026-09-26T03:05:00Z\"," +
+            "\"iat\":\"2026-09-26T03:00:00Z\"," +
+            "\"kid\":\"cloud-signing-key-v1\"," +
+            "\"max_affected_records\":1," +
+            "\"mutation_payload_sha256\":\"abc123\"," +
+            "\"operation_id\":\"12345678-1234-5678-1234-567812345678\"," +
+            "\"organization_id\":\"00000000-0000-0000-0000-000000000001\"," +
+            "\"signature\":\"\"}";
+        
+        assertEquals(expectedCanonical, result, "Envelope canonical form must match Agent PR #24 golden vector exactly");
+        
+        // Verify critical Agent PR #24 contract requirements:
+        assertTrue(result.contains("\"signature\":\"\""), "signature present as empty string");
+        assertTrue(result.contains("\"iat\":\"2026-09-26T03:00:00Z\""), "iat is RFC3339 string");
+        assertTrue(result.contains("\"exp\":\"2026-09-26T03:05:00Z\""), "exp is RFC3339 string");
+        
+        // Compute digest for documentation
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(canonical);
+        StringBuilder hexDigest = new StringBuilder();
+        for (byte b : hash) {
+            hexDigest.append(String.format("%02x", b));
+        }
+        System.out.println("Golden vector SHA-256: " + hexDigest);
     }
 }
