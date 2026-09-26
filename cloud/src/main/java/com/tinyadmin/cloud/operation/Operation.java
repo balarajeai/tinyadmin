@@ -72,6 +72,9 @@ public class Operation {
     @Column
     private UUID previewId;
     
+    @Column(length = 64)
+    private String previewFingerprint;
+    
     @Column
     private UUID confirmationId;
     
