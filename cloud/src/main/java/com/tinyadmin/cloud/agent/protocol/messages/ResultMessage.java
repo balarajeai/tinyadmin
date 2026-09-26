@@ -1,19 +1,29 @@
 package com.tinyadmin.cloud.agent.protocol.messages;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.NoArgsConstructor;
 
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Agent → Cloud: result_report(operation_id, status, body)
+ * Agent → Cloud: result(operation_id, status, result, error_message, protocol_version)
  * Durable result delivery from Agent after execution or rejection.
+ * Per Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
+ * 
+ * CRITICAL: message_type is "result" (not "result_report")
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-public class ResultReportMessage extends AgentMessage {
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ResultMessage extends AgentMessage {
+    
     @JsonProperty("operation_id")
     private UUID operationId;
     
@@ -26,12 +36,12 @@ public class ResultReportMessage extends AgentMessage {
     /**
      * Result body (engine-specific; may include affected rows, error details, etc.).
      */
-    @JsonProperty("body")
-    private Map<String, Object> body;
+    @JsonProperty("result")
+    private Map<String, Object> result;
     
     /**
-     * Agent's timestamp when result was persisted locally (milliseconds).
+     * Error message when status is "failed".
      */
-    @JsonProperty("result_timestamp_ms")
-    private Long resultTimestampMs;
+    @JsonProperty("error_message")
+    private String errorMessage;
 }

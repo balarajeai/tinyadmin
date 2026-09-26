@@ -16,9 +16,10 @@ import lombok.Data;
     @JsonSubTypes.Type(value = ChallengeMessage.class, name = "challenge"),
     @JsonSubTypes.Type(value = ChallengeResponseMessage.class, name = "challenge_response"),
     @JsonSubTypes.Type(value = SessionOkMessage.class, name = "session_ok"),
-    @JsonSubTypes.Type(value = ResultReportMessage.class, name = "result_report"),
+    @JsonSubTypes.Type(value = ResultMessage.class, name = "result"),
     @JsonSubTypes.Type(value = ResultAckMessage.class, name = "result_ack"),
-    @JsonSubTypes.Type(value = CancelRevokeSyncMessage.class, name = "cancel_revoke_sync"),
+    @JsonSubTypes.Type(value = CancelRevokeSyncRequestMessage.class, name = "cancel_revoke_sync_request"),
+    @JsonSubTypes.Type(value = CancelRevokeSyncResponseMessage.class, name = "cancel_revoke_sync_response"),
     @JsonSubTypes.Type(value = CommandMessage.class, name = "command")
 })
 public abstract class AgentMessage {

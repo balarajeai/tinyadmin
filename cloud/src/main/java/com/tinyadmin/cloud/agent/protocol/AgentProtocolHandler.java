@@ -83,8 +83,10 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
                 handleSessionHello(session, (SessionHelloMessage) agentMessage);
             } else if (agentMessage instanceof ChallengeResponseMessage) {
                 handleChallengeResponse(session, (ChallengeResponseMessage) agentMessage);
-            } else if (agentMessage instanceof ResultReportMessage) {
-                handleResultReport(session, (ResultReportMessage) agentMessage);
+            } else if (agentMessage instanceof CancelRevokeSyncRequestMessage) {
+                handleCancelRevokeRequest(session, (CancelRevokeSyncRequestMessage) agentMessage);
+            } else if (agentMessage instanceof ResultMessage) {
+                handleResult(session, (ResultMessage) agentMessage);
             } else {
                 log.warn("Unknown message type: {}", agentMessage.getClass().getSimpleName());
             }
@@ -230,75 +232,90 @@ public class AgentProtocolHandler extends TextWebSocketHandler {
         String sessionOkJson = objectMapper.writeValueAsString(sessionOk);
         session.sendMessage(new TextMessage(sessionOkJson));
         
-        // Send cancel/revoke sync (CR-PR12-001 §8)
-        sendCancelRevokeSync(session, authenticatedSession);
-        
         log.debug("Session established: sessionId={} agentId={}", session.getId(), agent.getId());
     }
     
     /**
-     * Send authoritative cancel/revoke sync after authentication (CR-PR12-001).
-     * Agent MUST apply this state before executing any pending mutations.
+     * Handle cancel_revoke_sync_request: Agent requests current cancel/revoke state.
+     * Per Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
      * 
      * CRITICAL (Finding #4): FAILED != CANCELLED
      * - FAILED: Mutation attempted and failed definitively
      * - CANCELLED: Operation cancelled before execution (revoked/disabled/rejected)
      */
-    private void sendCancelRevokeSync(WebSocketSession session, AgentSession agentSession) throws Exception {
-        // Query CANCELLED operations (NOT FAILED) for this Agent
-        // Finding #4: FAILED != CANCELLED
-        List<UUID> canceledOperationIds = operationRepository
-                .findByAgentIdAndLifecycleStatus(agentSession.getAgentId(), OperationLifecycleStatus.CANCELLED)
-                .stream()
-                .map(Operation::getId)
-                .toList();
+    private void handleCancelRevokeRequest(WebSocketSession session, CancelRevokeSyncRequestMessage request) 
+            throws Exception {
         
-        CancelRevokeSyncMessage syncMessage = CancelRevokeSyncMessage.builder()
-                .agentRevoked(false) // Agent is authenticated, so not revoked
-                .canceledOperationIds(canceledOperationIds)
-                .authzEpoch(Instant.now().toEpochMilli()) // Simple epoch marker
-                .build();
-        syncMessage.setMessageType("cancel_revoke_sync");
-        syncMessage.setProtocolVersion(CURRENT_PROTOCOL_VERSION);
-        
-        String syncJson = objectMapper.writeValueAsString(syncMessage);
-        session.sendMessage(new TextMessage(syncJson));
-        
-        log.debug("Cancel/revoke sync sent: sessionId={} agentId={} canceledCount={}", 
-                  session.getId(), agentSession.getAgentId(), canceledOperationIds.size());
-    }
-    
-    /**
-     * Handle result_report: persist result and send authenticated ack (§7 / SEC-PR12-005).
-     */
-    private void handleResultReport(WebSocketSession session, ResultReportMessage report) throws Exception {
         AgentSession agentSession = activeSessions.get(session.getId());
         
         // Require authenticated session
         if (agentSession == null || !agentSession.isAuthenticated()) {
-            log.warn("Result report from unauthenticated session: sessionId={}", session.getId());
+            log.warn("Cancel/revoke request from unauthenticated session: sessionId={}", session.getId());
+            session.close(CloseStatus.POLICY_VIOLATION);
+            return;
+        }
+        
+        // Validate agent_id matches session
+        if (!request.getAgentId().equals(agentSession.getAgentId())) {
+            log.error("Cancel/revoke request: agent_id mismatch sessionAgent={} requestAgent={}", 
+                     agentSession.getAgentId(), request.getAgentId());
+            session.close(CloseStatus.POLICY_VIOLATION);
+            return;
+        }
+        
+        // Query CANCELLED operations (NOT FAILED) for this Agent
+        List<String> cancelledOperations = operationRepository
+                .findByAgentIdAndLifecycleStatus(agentSession.getAgentId(), OperationLifecycleStatus.CANCELLED)
+                .stream()
+                .map(op -> op.getId().toString())
+                .toList();
+        
+        // Build response per Agent PR #24 - UK spelling "cancelled_operations"
+        CancelRevokeSyncResponseMessage response = CancelRevokeSyncResponseMessage.builder()
+                .cancelledOperations(cancelledOperations)
+                .build();
+        response.setMessageType("cancel_revoke_sync_response");
+        response.setProtocolVersion(CURRENT_PROTOCOL_VERSION);
+        
+        String responseJson = objectMapper.writeValueAsString(response);
+        session.sendMessage(new TextMessage(responseJson));
+        
+        log.debug("Cancel/revoke sync response sent: sessionId={} agentId={} cancelledCount={}", 
+                  session.getId(), agentSession.getAgentId(), cancelledOperations.size());
+    }
+    
+    /**
+     * Handle result: persist result and send authenticated ack (§7 / SEC-PR12-005).
+     * Per Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
+     */
+    private void handleResult(WebSocketSession session, ResultMessage result) throws Exception {
+        AgentSession agentSession = activeSessions.get(session.getId());
+        
+        // Require authenticated session
+        if (agentSession == null || !agentSession.isAuthenticated()) {
+            log.warn("Result from unauthenticated session: sessionId={}", session.getId());
             session.close(CloseStatus.POLICY_VIOLATION);
             return;
         }
         
         // Validate session still active
         if (!sessionAuthService.isSessionValid(agentSession)) {
-            log.warn("Result report from invalid session: sessionId={}", session.getId());
+            log.warn("Result from invalid session: sessionId={}", session.getId());
             session.close(CloseStatus.POLICY_VIOLATION.withReason("Session expired or revoked"));
             activeSessions.remove(session.getId());
             return;
         }
         
-        UUID operationId = report.getOperationId();
-        String status = report.getStatus();
+        UUID operationId = result.getOperationId();
+        String status = result.getStatus();
         
-        log.info("Result report received: sessionId={} agentId={} operationId={} status={}", 
+        log.info("Result received: sessionId={} agentId={} operationId={} status={}", 
                  session.getId(), agentSession.getAgentId(), operationId, status);
         
         // Update operation lifecycle (idempotent)
         Optional<Operation> operationOpt = operationRepository.findById(operationId);
         if (operationOpt.isEmpty()) {
-            log.warn("Result report for unknown operation: operationId={}", operationId);
+            log.warn("Result for unknown operation: operationId={}", operationId);
             // Still send ack to allow Agent to clear its durable result
         } else {
             Operation operation = operationOpt.get();

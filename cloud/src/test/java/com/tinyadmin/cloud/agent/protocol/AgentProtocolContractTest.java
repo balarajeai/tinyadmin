@@ -115,22 +115,27 @@ class AgentProtocolContractTest {
     }
     
     @Test
-    void resultReportMessageShape() throws Exception {
-        // Verify result_report conforms to protocol §7
-        ResultReportMessage report = new ResultReportMessage();
-        report.setMessageType("result_report");
-        report.setProtocolVersion(1);
-        report.setOperationId(UUID.randomUUID());
-        report.setStatus("succeeded");
-        report.setBody(Map.of("affected_rows", 1));
-        report.setResultTimestampMs(System.currentTimeMillis());
+    void resultMessageShape() throws Exception {
+        // Verify result conforms to Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
+        ResultMessage result = new ResultMessage();
+        result.setMessageType("result");
+        result.setProtocolVersion(1);
+        result.setOperationId(UUID.randomUUID());
+        result.setStatus("succeeded");
+        result.setResult(Map.of("affected_rows", 1));
+        result.setErrorMessage(null);
         
-        String json = objectMapper.writeValueAsString(report);
+        String json = objectMapper.writeValueAsString(result);
         
-        assertTrue(json.contains("\"message_type\":\"result_report\""));
+        assertTrue(json.contains("\"message_type\":\"result\""));
         assertTrue(json.contains("\"operation_id\""));
         assertTrue(json.contains("\"status\":\"succeeded\""));
-        assertTrue(json.contains("\"body\""));
+        assertTrue(json.contains("\"result\""));
+        
+        // Verify round-trip
+        AgentMessage parsed = objectMapper.readValue(json, AgentMessage.class);
+        assertInstanceOf(ResultMessage.class, parsed);
+        assertEquals(result.getOperationId(), ((ResultMessage) parsed).getOperationId());
     }
     
     @Test
@@ -155,28 +160,51 @@ class AgentProtocolContractTest {
     }
     
     @Test
-    void cancelRevokeSyncMessageShape() throws Exception {
-        // Verify cancel_revoke_sync conforms to protocol §8 (CR-PR12-001)
-        CancelRevokeSyncMessage sync = CancelRevokeSyncMessage.builder()
-                .agentRevoked(false)
-                .canceledOperationIds(Arrays.asList(UUID.randomUUID(), UUID.randomUUID()))
-                .authzEpoch(System.currentTimeMillis())
+    void cancelRevokeSyncRequestMessageShape() throws Exception {
+        // Verify cancel_revoke_sync_request conforms to Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
+        UUID agentId = UUID.randomUUID();
+        CancelRevokeSyncRequestMessage request = CancelRevokeSyncRequestMessage.builder()
+                .agentId(agentId)
                 .build();
-        sync.setMessageType("cancel_revoke_sync");
-        sync.setProtocolVersion(1);
+        request.setMessageType("cancel_revoke_sync_request");
+        request.setProtocolVersion(1);
         
-        String json = objectMapper.writeValueAsString(sync);
+        String json = objectMapper.writeValueAsString(request);
         
-        assertTrue(json.contains("\"message_type\":\"cancel_revoke_sync\""));
-        assertTrue(json.contains("\"agent_revoked\":false"));
-        assertTrue(json.contains("\"canceled_operation_ids\""));
-        assertTrue(json.contains("\"authz_epoch\""));
+        assertTrue(json.contains("\"message_type\":\"cancel_revoke_sync_request\""));
+        assertTrue(json.contains("\"agent_id\""));
         
-        // Verify Agent can parse
+        // Verify round-trip
         AgentMessage parsed = objectMapper.readValue(json, AgentMessage.class);
-        assertInstanceOf(CancelRevokeSyncMessage.class, parsed);
-        CancelRevokeSyncMessage parsedSync = (CancelRevokeSyncMessage) parsed;
-        assertEquals(2, parsedSync.getCanceledOperationIds().size());
+        assertInstanceOf(CancelRevokeSyncRequestMessage.class, parsed);
+        assertEquals(agentId, ((CancelRevokeSyncRequestMessage) parsed).getAgentId());
+    }
+    
+    @Test
+    void cancelRevokeSyncResponseMessageShape() throws Exception {
+        // Verify cancel_revoke_sync_response conforms to Agent PR #24 @ e3a006885cb79f0123da8404feb4c7cf4b81272f
+        // CRITICAL: UK spelling "cancelled_operations" (not US "canceled")
+        String opId1 = UUID.randomUUID().toString();
+        String opId2 = UUID.randomUUID().toString();
+        
+        CancelRevokeSyncResponseMessage response = CancelRevokeSyncResponseMessage.builder()
+                .cancelledOperations(Arrays.asList(opId1, opId2))
+                .build();
+        response.setMessageType("cancel_revoke_sync_response");
+        response.setProtocolVersion(1);
+        
+        String json = objectMapper.writeValueAsString(response);
+        
+        assertTrue(json.contains("\"message_type\":\"cancel_revoke_sync_response\""));
+        assertTrue(json.contains("\"cancelled_operations\""));
+        assertFalse(json.contains("\"canceled_operations\""), "Must use UK spelling 'cancelled' not US 'canceled'");
+        
+        // Verify round-trip
+        AgentMessage parsed = objectMapper.readValue(json, AgentMessage.class);
+        assertInstanceOf(CancelRevokeSyncResponseMessage.class, parsed);
+        CancelRevokeSyncResponseMessage parsedResponse = (CancelRevokeSyncResponseMessage) parsed;
+        assertEquals(2, parsedResponse.getCancelledOperations().size());
+        assertTrue(parsedResponse.getCancelledOperations().contains(opId1));
     }
     
     @Test

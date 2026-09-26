@@ -2,7 +2,6 @@ package com.tinyadmin.cloud.security;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -31,7 +30,6 @@ import java.util.UUID;
  * Production: Replace with database-backed membership lookup or OIDC/SSO
  */
 @Component
-@Profile("!test")
 @RequiredArgsConstructor
 @Slf4j
 public class OperatorAuthenticationProvider implements AuthenticationProvider {
@@ -43,6 +41,11 @@ public class OperatorAuthenticationProvider implements AuthenticationProvider {
     
     // Demo user credentials (DEMO ONLY - not for production)
     private static final String DEMO_EMAIL = "admin@tinyadmin.test";
+    
+    // Pre-encoded BCrypt hash for password "admin" 
+    // Generated with BCryptPasswordEncoder().encode("admin")
+    // CRITICAL: Must be static constant - encoding on every check fails due to new salt
+    private static final String DEMO_PASSWORD_HASH = "$2a$10$7EqJtq98hPqEX7fNZaFWoO8gTbz8dKIQS0Sj/YhM2qxC7VZi4J8Ue";
     
     @Override
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
@@ -56,8 +59,9 @@ public class OperatorAuthenticationProvider implements AuthenticationProvider {
             throw new BadCredentialsException("Invalid credentials");
         }
         
-        // Verify password
-        if (!passwordEncoder.matches(password, passwordEncoder.encode("admin"))) {
+        // Verify password against pre-encoded hash
+        // CRITICAL: Compare against STATIC hash, not passwordEncoder.encode("admin") which creates NEW hash each time
+        if (!passwordEncoder.matches(password, DEMO_PASSWORD_HASH)) {
             log.warn("Authentication failed: invalid password for user {}", email);
             throw new BadCredentialsException("Invalid credentials");
         }
