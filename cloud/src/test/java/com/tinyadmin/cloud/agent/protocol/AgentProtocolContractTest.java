@@ -47,6 +47,7 @@ class AgentProtocolContractTest {
         objectMapper = new ObjectMapper();
         signingService = new CommandSigningService(objectMapper);
         ReflectionTestUtils.setField(signingService, "allowEphemeral", true);
+        ReflectionTestUtils.setField(signingService, "keyId", "cloud-signing-key-v1-test");
         signingService.initialize();
         
         canonicalizer = new JcsCanonicalizer(objectMapper);
@@ -202,10 +203,12 @@ class AgentProtocolContractTest {
                 1
         );
         
+        assertNotNull(signedCommand, "SignedCommand should not be null");
         Map<String, Object> envelope = signedCommand.getEnvelope();
+        assertNotNull(envelope, "Envelope should not be null");
         
         // Verify required envelope fields per §6.1
-        assertNotNull(envelope.get("kid"));
+        assertNotNull(envelope.get("kid"), "kid should be present in envelope");
         assertNotNull(envelope.get("operation_id"));
         assertNotNull(envelope.get("organization_id"));
         assertNotNull(envelope.get("environment_id"));
