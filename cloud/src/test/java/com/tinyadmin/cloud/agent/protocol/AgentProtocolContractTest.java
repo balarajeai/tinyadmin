@@ -135,11 +135,10 @@ class AgentProtocolContractTest {
     
     @Test
     void resultAckMessageShape() throws Exception {
-        // Verify result_ack conforms to protocol §7 (SEC-PR12-005)
+        // Verify result_ack conforms to Agent PR #24
         ResultAckMessage ack = ResultAckMessage.builder()
-                .operationId(UUID.randomUUID())
-                .ackSignature(Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[64]))
-                .ackPayloadDigest("a".repeat(64)) // hex SHA-256
+                .operationId(UUID.randomUUID().toString())
+                .acknowledged(true)
                 .build();
         ack.setMessageType("result_ack");
         ack.setProtocolVersion(1);
