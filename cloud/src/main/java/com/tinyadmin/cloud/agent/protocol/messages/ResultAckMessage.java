@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.agent.protocol.messages;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +20,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ResultAckMessage extends AgentMessage {
+    @JsonProperty("operation_id")
     private UUID operationId;
     
     /**
@@ -26,11 +28,13 @@ public class ResultAckMessage extends AgentMessage {
      * Proves Cloud received and persisted result.
      * Agent verifies with Cloud command-signing public key.
      */
+    @JsonProperty("ack_signature")
     private String ackSignature;
     
     /**
      * Canonical ack payload digest for verification (hex SHA-256).
      * Payload: {"operation_id":"<uuid>","status":"acked","iat":<timestamp>}
      */
+    @JsonProperty("ack_payload_digest")
     private String ackPayloadDigest;
 }

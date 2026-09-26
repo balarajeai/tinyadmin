@@ -1,5 +1,6 @@
 package com.tinyadmin.cloud.agent.protocol.messages;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -12,5 +13,6 @@ import java.util.UUID;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class SessionHelloMessage extends AgentMessage {
+    @JsonProperty("agent_id")
     private UUID agentId;
 }
