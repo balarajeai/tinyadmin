@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -85,6 +86,6 @@ class OperatorAuthenticationSecurityTest {
         // Should not require operator HTTP authentication
         // (Will fail for other reasons, but not 401)
         mockMvc.perform(get("/agent/v1/ws"))
-                .andExpect(status().isNot(401));
+                .andExpect(status().is(not(401)));
     }
 }

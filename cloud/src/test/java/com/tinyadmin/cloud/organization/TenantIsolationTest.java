@@ -56,7 +56,7 @@ class TenantIsolationTest extends BaseIntegrationTest {
             .organization(org1)
             .environment(env1)
             .kind(OperationKind.PREVIEW)
-            .lifecycleStatus(OperationLifecycleStatus.PENDING)
+            .lifecycleStatus(OperationLifecycleStatus.PREVIEW_PENDING)
             .build();
         op1 = operationRepository.save(op1);
         
